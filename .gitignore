@@ -1,0 +1,15 @@
+# Environments
+vivida_virtual_env/
+venv/
+env/
+
+# Data & AI
+data/raw/
+data/processed/
+*.npy
+*.pth
+
+# Mac/System
+.DS_Store
+__pycache__/
+.env
