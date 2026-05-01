@@ -35,7 +35,7 @@ class AudioPreprocessor:
     def peak_normalisation(self, audio):
         return librosa.util.normalize(audio)
     
-    def create_log_mel_spectogram(self, audio):
+    def create_log_mel_spectrogram(self, audio):
         mel_spec = librosa.feature.melspectrogram(
             y=audio,
             sr=self.sample_rate,
@@ -63,6 +63,6 @@ class AudioPreprocessor:
         audio = self.peak_normalisation(audio)
 
         # 5. Convert to the final "Image"
-        spectrogram = self.create_log_mel_spectogram(audio)
+        spectrogram = self.create_log_mel_spectrogram(audio)
 
         return spectrogram
