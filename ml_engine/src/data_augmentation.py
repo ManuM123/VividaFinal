@@ -19,11 +19,13 @@ class DataAugmentation:
             "traffic": os.path.join(background_noises_path, "traffic.wav")
         }
 
-    # adds natural-sounding pink noise
+    
     def add_pink_noise(self, audio, noise_level=0.005):
         pink_noise = cn.powerlaw_psd_gaussian(1, len(audio))
         return audio + (noise_level * pink_noise)
-    
+
+
+    # adds either chatter or traffic noise over the audio, attempting to replicate real app use case
     def add_background_noise(self, audio):
       
         noise_volumes = {
@@ -58,23 +60,7 @@ class DataAugmentation:
             return audio + (current_volume * noise_wav)
         
         return audio
-        
 
-    # overlays real-world sounds like chatter or traffic
-    # def add_background_noise(self, audio,volume=0.1):
-    #     noise_type = random.choice(list(self.background_noise.keys()))
-    #     file_path = self.background_noise.get(noise_type)
-
-    #     if file_path and os.path.exists(file_path):
-    #         noise_wav, _ = librosa.load(file_path, sr=self.sample_rate)
-           
-    #         # Ensure length of background noise we're adding matches the original audio length
-    #         if len(noise_wav) < len(audio):
-    #             noise_wav = np.pad(noise_wav, (0, len(audio) - len(noise_wav)), mode='wrap')
-    #         else:
-    #             noise_wav = noise_wav[:len(audio)]
-    #         return audio + (volume * noise_wav)
-    #     return audio
     
     # Shifts the audio forward by adding random silence at the start. This mimics a user delay after hitting 'Record'.
     def add_time_shift(self, audio, max_shift_seconds=1.5):
