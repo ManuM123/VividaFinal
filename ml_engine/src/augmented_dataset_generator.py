@@ -30,7 +30,7 @@ def build_dataset(raw_data_path, npy_out, wav_out):
                 audio = preprocessor.peak_normalisation(audio)
                 
                 # --- 2. ORIGINAL SPECTROGRAM ---
-                orig_spec = preprocessor.create_log_mel_spectrogram(audio)
+                orig_spec = preprocessor.extract_hybrid_features(audio)
                 np.save(os.path.join(npy_out, f"orig_{base_name}.npy"), orig_spec)
                 
                 # --- 3. AUGMENTATION ---
@@ -39,7 +39,7 @@ def build_dataset(raw_data_path, npy_out, wav_out):
                 sf.write(os.path.join(wav_out, f"aug_{base_name}.wav"), aug_audio, 16000)
                 
                 # --- 4. AUGMENTED SPECTROGRAM ---
-                aug_spec = preprocessor.create_log_mel_spectrogram(aug_audio)
+                aug_spec = preprocessor.extract_hybrid_features(aug_audio)
                 if random.random() > 0.5:
                     aug_spec = augmenter.apply_spec_augment(aug_spec)
                 

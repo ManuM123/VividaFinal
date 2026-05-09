@@ -1,220 +1,288 @@
-# import numpy as np
-# import time
-# import keras
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# from sklearn.metrics import classification_report, confusion_matrix
-# from src.models.mlp import MLP, train_mlp
-# from src.models.cnn import CNN, train_cnn
-# from src.data_loader import get_kfold_dataloaders
-
-# def run_experiment(model_type: str, n_splits: int= 5, epochs:int =50, batch_size:int =32):
-#     folds, _, x_test_raw, y_test_raw = get_kfold_dataloaders(n_splits=n_splits, batch_size=batch_size)
-
-#     model_type = model_type.lower()
-
-#     if model_type == "mlp":
-#         input_shape = (128,126)
-#         train_func = train_mlp
-#         model_class = MLP
-#         cmap_colour = 'Blues'
-
-#     elif model_type == "cnn":
-#         x_test_raw = x_test_raw[..., np.newaxis]
-#         input_shape = (128,126,1)
-#         train_func = train_cnn
-#         model_class = CNN
-#         cmap_colour = 'Greens'
-
-#     elif model_type == 'ast':
-#         print("AST Pipeline not done yet")
-#         return
-    
-#     else:
-#         raise ValueError("Invalid model type, please choose either mlp, cnn or ast")
-    
-
-#     all_val_accuracies = []
-#     last_model = None
-
-#     for i, (train_ds, val_ds) in enumerate(folds):
-#         print(f"\n" + "="*30)
-#         print(f"STARTING FOLD {i+1}/5")
-#         print("="*30)
-
-#         keras.backend.clear_session()
-
-#         model = model_class(input_shape=input_shape)
-
-#         history = train_func(model, train_ds, val_ds, epochs=epochs)
-
-#         best_val_acc = max(history.history['val_accuracy'])
-#         all_val_accuracies.append(best_val_acc)
-#         last_model = model
-#         print(f"Fold {i+1} Best Val Acc: {best_val_acc:.4f}")
-
-    
-#     print("\n" + "="*30)
-#     print(f"{model_type.upper()} TEST SET RUN")
-#     print("="*30)
-
-#     y_pred_probs = last_model.predict(x_test_raw)
-#     y_pred = np.argmax(y_pred_probs, axis=1)
-
-#     test_acc = np.mean(y_pred == y_test_raw)
-#     print(f"TEST ACCURACY: {test_acc:.4f}\n")
-
-#     emotions = ['Neutral', 'Calm', 'Happy', 'Sad', 'Angry', 'Fearful', 'Disgust', 'Surprised']
-
-#     # Classification Report
-#     print("CLASSIFICATION REPORT:")
-#     print(classification_report(y_test_raw, y_pred, target_names=emotions, zero_division=0))
-
-#     # Inference latency
-#     start_time = time.time()
-#     _ = model.predict(x_test_raw[0:1], verbose=0)
-#     latency_ms = (time.time() - start_time) * 1000
-#     print(f"\n Inference Latency: {latency_ms:.2f} ms")
-
-#         # Confusion Matrix
-#     cm = confusion_matrix(y_test_raw, y_pred)
-
-#     plt.figure(figsize=(10,8))
-#     sns.heatmap(cm, annot=True, fmt='d', cmap=cmap_colour, xticklabels=emotions, yticklabels=emotions)
-#     plt.title(f"{model_type.upper()} Test Set Confusion Matrix", fontsize=16)
-#     plt.ylabel('True Emotion', fontsize=12)
-#     plt.xlabel('Predicted Emotion', fontsize=12)
-#     plt.tight_layout()
-#     plt.show()
-
-#     return test_acc, all_val_accuracies
-
-
-
-    
-import numpy as np
+import json
+import os
+import sys
 import time
+
+os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import keras
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
+from sklearn.utils.class_weight import compute_class_weight
 
-from src.models.mlp import MLP, train_mlp
-from src.models.cnn import CNN, train_cnn
 from src.data_loader import get_kfold_dataloaders
+from src.models.cnn_lstm import Hybrid_CNN_LSTM, train_hybrid_cnn_lstm
+from src.models.mlp import MLP, train_mlp
 
-def run_experiment(model_type: str, n_splits: int = 5, epochs: int = 100, batch_size: int = 32):
-    # We unpack the test set variables into `_` to explicitly ignore them and prevent data leakage
-    folds, _, _, _ = get_kfold_dataloaders(n_splits=n_splits, batch_size=batch_size)
 
+EMOTIONS = ["Neutral", "Calm", "Happy", "Sad", "Angry", "Fearful", "Disgust", "Surprised"]
+
+
+def _dataset_labels(dataset):
+    labels = []
+    for _, y_batch in dataset:
+        labels.extend(y_batch.numpy().tolist())
+    return np.array(labels)
+
+
+def _class_weights_from_dataset(dataset):
+    y = _dataset_labels(dataset)
+    classes = np.unique(y)
+    weights = compute_class_weight(class_weight="balanced", classes=classes, y=y)
+    return {int(cls): float(weight) for cls, weight in zip(classes, weights)}
+
+
+def _predict_dataset(model, dataset):
+    y_true = _dataset_labels(dataset)
+    y_prob = model.predict(dataset, verbose=0)
+    y_pred = np.argmax(y_prob, axis=1)
+    return y_true, y_pred
+
+
+def _latency_ms(model, sample, warmup_runs=3, timed_runs=20):
+    for _ in range(warmup_runs):
+        model.predict(sample, verbose=0)
+
+    start = time.perf_counter()
+    for _ in range(timed_runs):
+        model.predict(sample, verbose=0)
+    return ((time.perf_counter() - start) / timed_runs) * 1000
+
+
+def _save_confusion_matrix(cm, model_type, output_dir, cmap_colour):
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"{model_type}_confusion_matrix.png")
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap=cmap_colour,
+        xticklabels=EMOTIONS,
+        yticklabels=EMOTIONS,
+    )
+    plt.title(f"{model_type.upper()} Held-Out Test Confusion Matrix", fontsize=16)
+    plt.ylabel("True Emotion", fontsize=12)
+    plt.xlabel("Predicted Emotion", fontsize=12)
+    plt.tight_layout()
+    plt.savefig(path, dpi=200)
+    plt.close()
+    return path
+
+
+def _model_config(model_type):
     model_type = model_type.lower()
 
     if model_type == "mlp":
-        input_shape = (128,126)
-        train_func = train_mlp
-        model_class = MLP
-        cmap_colour = 'Blues'
+        return {
+            "input_shape": (180, 126),
+            "model_input": "mlp",
+            "model_class": MLP,
+            "train_func": train_mlp,
+            "cmap": "Blues",
+            "use_class_weight": False,
+        }
 
-    elif model_type == "cnn":
-        input_shape = (128,126,1)
-        train_func = train_cnn
-        model_class = CNN
-        cmap_colour = 'Greens'
+    if model_type in {"cnn_lstm", "cnn"}:
+        return {
+            "input_shape": (180, 126, 1),
+            "model_input": "cnn_lstm",
+            "model_class": Hybrid_CNN_LSTM,
+            "train_func": train_hybrid_cnn_lstm,
+            "cmap": "Greens",
+            "use_class_weight": True,
+        }
 
-    elif model_type == 'ast':
-        print("AST Pipeline not done yet")
-        return
-    
-    else:
-        raise ValueError("Invalid model type, please choose either mlp, cnn or ast")
-    
-    all_val_accuracies = []
-    last_model = None
-    last_val_ds = None
+    if model_type == "ast":
+        raise NotImplementedError(
+            "AST fine-tuning still needs a separate PyTorch/Hugging Face pipeline."
+        )
 
-    for i, (train_ds, val_ds) in enumerate(folds):
-        print(f"\n" + "="*30)
-        print(f"STARTING FOLD {i+1}/{n_splits}")
-        print("="*30)
+    raise ValueError("Invalid model type. Choose one of: mlp, cnn_lstm, ast")
 
-        # Clear session to keep the GPU memory fresh
+
+def run_experiment(
+    model_type: str,
+    n_splits: int = 5,
+    epochs: int = 100,
+    batch_size: int = 32,
+    seed: int = 42,
+    output_dir: str = "ml_engine/results",
+    save_best_model: bool = True,
+):
+    config = _model_config(model_type)
+    model_type = "cnn_lstm" if model_type.lower() == "cnn" else model_type.lower()
+
+    folds, test_ds, _, _ = get_kfold_dataloaders(
+        n_splits=n_splits,
+        batch_size=batch_size,
+        seed=seed,
+        model_input=config["model_input"],
+    )
+
+    fold_results = []
+    best_model = None
+    best_val_acc = -1.0
+    best_fold = None
+
+    for i, (train_ds, val_ds) in enumerate(folds, start=1):
+        print("\n" + "=" * 30)
+        print(f"STARTING {model_type.upper()} FOLD {i}/{n_splits}")
+        print("=" * 30)
+
         keras.backend.clear_session()
+        model = config["model_class"](input_shape=config["input_shape"])
 
-        model = model_class(input_shape=input_shape)
+        class_weight = (
+            _class_weights_from_dataset(train_ds) if config["use_class_weight"] else None
+        )
+        history = config["train_func"](
+            model,
+            train_ds,
+            val_ds,
+            epochs=epochs,
+            class_weight=class_weight,
+        ) if config["use_class_weight"] else config["train_func"](
+            model,
+            train_ds,
+            val_ds,
+            epochs=epochs,
+        )
 
-        # Start the high-speed training
-        history = train_func(model, train_ds, val_ds, epochs=epochs)
+        fold_best_val_acc = float(max(history.history["val_accuracy"]))
+        fold_best_val_loss = float(min(history.history["val_loss"]))
+        fold_results.append(
+            {
+                "fold": i,
+                "best_val_accuracy": fold_best_val_acc,
+                "best_val_loss": fold_best_val_loss,
+                "epochs_ran": len(history.history["loss"]),
+            }
+        )
 
-        best_val_acc = max(history.history['val_accuracy'])
-        all_val_accuracies.append(best_val_acc)
-        
-        # Save the model and validation dataset of the current fold for diagnostics
-        last_model = model
-        last_val_ds = val_ds
-        
-        print(f"Fold {i+1} Best Val Acc: {best_val_acc:.4f}")
+        if fold_best_val_acc > best_val_acc:
+            best_model = model
+            best_val_acc = fold_best_val_acc
+            best_fold = i
 
-    # Calculate the average across all folds
-    mean_val_acc = np.mean(all_val_accuracies)
+        print(f"Fold {i} Best Val Acc: {fold_best_val_acc:.4f}")
 
-    print("\n" + "="*30)
-    print(f"{model_type.upper()} CROSS-VALIDATION COMPLETE")
-    print(f"Average Validation Accuracy: {mean_val_acc:.4f}")
-    print("="*30)
+    print("\n" + "=" * 30)
+    print(f"{model_type.upper()} HELD-OUT TEST EVALUATION")
+    print(f"Best validation fold: {best_fold}")
+    print("=" * 30)
 
-    
-    print("\n" + "="*30)
-    print(f"DIAGNOSTIC RUN (USING FOLD {n_splits} VALIDATION DATA)")
-    print("="*30)
-
-    # Extract the true labels from the TensorFlow dataset
-    y_true = []
-    for x, y in last_val_ds:
-        y_true.extend(y.numpy())
-    y_true = np.array(y_true)
-    
-    # If labels are one-hot encoded, convert to 1D array
-    if len(y_true.shape) > 1 and y_true.shape[1] > 1:
-        y_true = np.argmax(y_true, axis=1)
-
-    # Generate predictions
-    y_pred_probs = last_model.predict(last_val_ds)
-    y_pred = np.argmax(y_pred_probs, axis=1)
-
-    emotions = ['Neutral', 'Calm', 'Happy', 'Sad', 'Angry', 'Fearful', 'Disgust', 'Surprised']
-
-    # Classification Report
-    print("CLASSIFICATION REPORT:")
-    print(classification_report(y_true, y_pred, target_names=emotions, zero_division=0))
-
-    # --- INFERENCE LATENCY ---
-    # Grab one batch from the validation set, then extract just the first sample
-    sample_batch, _ = next(iter(last_val_ds))
-    single_sample = sample_batch[0:1] 
-    
-    start_time = time.time()
-    _ = last_model.predict(single_sample, verbose=0)
-    latency_ms = (time.time() - start_time) * 1000
-    print(f"\n⚡ Inference Latency: {latency_ms:.2f} ms per sample\n")
-
-    # Confusion Matrix
+    y_true, y_pred = _predict_dataset(best_model, test_ds)
+    accuracy = float(accuracy_score(y_true, y_pred))
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, average="weighted", zero_division=0
+    )
     cm = confusion_matrix(y_true, y_pred)
 
-    plt.figure(figsize=(10,8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap=cmap_colour, xticklabels=emotions, yticklabels=emotions)
-    plt.title(f"{model_type.upper()} Validation Confusion Matrix (Fold {n_splits})", fontsize=16)
-    plt.ylabel('True Emotion', fontsize=12)
-    plt.xlabel('Predicted Emotion', fontsize=12)
-    plt.tight_layout()
-    plt.show()
+    sample_batch, _ = next(iter(test_ds))
+    latency = float(_latency_ms(best_model, sample_batch[0:1]))
 
-    # Return the mean validation accuracy as your "score to beat"
-    return mean_val_acc, all_val_accuracies
+    os.makedirs(output_dir, exist_ok=True)
+    cm_path = _save_confusion_matrix(cm, model_type, output_dir, config["cmap"])
+
+    model_path = None
+    if save_best_model:
+        model_path = os.path.join(output_dir, f"{model_type}_best.keras")
+        best_model.model.save(model_path)
+
+    report_text = classification_report(
+        y_true,
+        y_pred,
+        target_names=EMOTIONS,
+        zero_division=0,
+    )
+    print("CLASSIFICATION REPORT:")
+    print(report_text)
+    print(f"Test Accuracy: {accuracy:.4f}")
+    print(f"Weighted Precision: {precision:.4f}")
+    print(f"Weighted Recall: {recall:.4f}")
+    print(f"Weighted F1: {f1:.4f}")
+    print(f"Inference Latency: {latency:.2f} ms/sample")
+
+    results = {
+        "model_type": model_type,
+        "n_splits": n_splits,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "seed": seed,
+        "best_validation_fold": best_fold,
+        "cross_validation": {
+            "folds": fold_results,
+            "mean_best_val_accuracy": float(
+                np.mean([r["best_val_accuracy"] for r in fold_results])
+            ),
+            "std_best_val_accuracy": float(
+                np.std([r["best_val_accuracy"] for r in fold_results])
+            ),
+        },
+        "held_out_test": {
+            "accuracy": accuracy,
+            "weighted_precision": float(precision),
+            "weighted_recall": float(recall),
+            "weighted_f1": float(f1),
+            "latency_ms_per_sample": latency,
+            "classification_report": classification_report(
+                y_true,
+                y_pred,
+                target_names=EMOTIONS,
+                output_dict=True,
+                zero_division=0,
+            ),
+            "confusion_matrix": cm.tolist(),
+        },
+        "artifacts": {
+            "confusion_matrix_path": cm_path,
+            "model_path": model_path,
+        },
+    }
+
+    results_path = os.path.join(output_dir, f"{model_type}_results.json")
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"Saved metrics to {results_path}")
+    print(f"Saved confusion matrix to {cm_path}")
+    if model_path:
+        print(f"Saved best model to {model_path}")
+
+    return results
 
 
+if __name__ == "__main__":
+    import argparse
 
+    parser = argparse.ArgumentParser(description="Train and evaluate a Vivida SER model.")
+    parser.add_argument("model_type", choices=["mlp", "cnn_lstm", "cnn", "ast"])
+    parser.add_argument("--splits", type=int, default=5)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output-dir", default="ml_engine/results")
+    parser.add_argument("--no-save-model", action="store_true")
+    args = parser.parse_args()
 
-
-
-
-
+    run_experiment(
+        model_type=args.model_type,
+        n_splits=args.splits,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        output_dir=args.output_dir,
+        save_best_model=not args.no_save_model,
+    )

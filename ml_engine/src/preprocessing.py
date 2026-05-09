@@ -35,17 +35,29 @@ class AudioPreprocessor:
     def peak_normalisation(self, audio):
         return librosa.util.normalize(audio)
     
-    def  create_log_mel_spectrogram(self, audio):
-        mel_spec = librosa.feature.melspectrogram(
-            y=audio,
-            sr=self.sample_rate,
-            n_mels = 128,
-            hop_length=512
+    def extract_hybrid_features(self, audio):
+        # mel spectrogram (128 x 126)
+        mel_spectrogram = librosa.feature.melspectrogram(
+            y=audio, sr=self.sample_rate, n_mels=128, hop_length=512
+        )
+        log_mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
+
+        # MFCCs (40 x time)
+        mfccs = librosa.feature.mfcc(
+            y=audio, sr=self.sample_rate, n_mfcc=40, hop_length=512
         )
 
-        log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
+        # chroma (12 x time)
+        chroma = librosa.feature.chroma_stft(
+            y=audio, sr=self.sample_rate, hop_length=512
+        )
 
-        return log_mel_spec
+        # stack to make 180 x Time matrix
+        hybrid_features = np.vstack([log_mel_spectrogram, mfccs, chroma])
+
+        return hybrid_features
+    
+
     
     def process_file(self, file_path):
         # end to end function that preprocesses .wav file and converts it into spectogram
@@ -62,7 +74,4 @@ class AudioPreprocessor:
         # 4. Boost the volume (Normalization)
         audio = self.peak_normalisation(audio)
 
-        # 5. Convert to the final "Image"
-        spectrogram = self.create_log_mel_spectrogram(audio)
-
-        return spectrogram
+        return self.extract_hybrid_features(audio)

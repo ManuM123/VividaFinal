@@ -5,7 +5,7 @@ from keras import Model, Sequential
 
 class MLP(Model):
     
-    def __init__(self, input_shape: tuple[int, int] = (128, 126), hidden_dims: list[int] = [512, 256, 128], output_dim: int = 8, dropout_rate: float = 0.3):
+    def __init__(self, input_shape: tuple[int, int] = (180, 126), hidden_dims: list[int] = [512, 256, 128], output_dim: int = 8, dropout_rate: float = 0.3):
         super(MLP, self).__init__()
 
         layers = []

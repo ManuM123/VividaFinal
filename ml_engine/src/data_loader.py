@@ -6,7 +6,28 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "..", "data", "processed_spectrograms")
 
-def get_kfold_dataloaders(n_splits=5, batch_size=32, seed=42):
+def _normalise_feature_blocks(x_arr):
+    """Normalise mel and engineered feature blocks separately."""
+    mel = x_arr[:, :128, :]
+    features = x_arr[:, 128:, :]
+
+    mel = (mel - np.min(mel)) / (np.max(mel) - np.min(mel) + 1e-8)
+    features = (features - np.min(features)) / (np.max(features) - np.min(features) + 1e-8)
+
+    x_arr[:, :128, :] = mel
+    x_arr[:, 128:, :] = features
+    return x_arr
+
+
+def _prepare_model_input(x_arr, model_input="hybrid"):
+    if model_input in {"hybrid", "mlp"}:
+        return x_arr
+    if model_input in {"cnn_lstm", "cnn"}:
+        return x_arr[..., np.newaxis]
+    raise ValueError("model_input must be one of: 'hybrid', 'mlp', 'cnn_lstm', 'cnn'")
+
+
+def get_kfold_dataloaders(n_splits=5, batch_size=32, seed=42, model_input="hybrid"):
     all_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.npy')]
     
     # 1. BUCKET SYSTEM: Manually grouping twins to prevent data leakage
@@ -39,18 +60,14 @@ def get_kfold_dataloaders(n_splits=5, batch_size=32, seed=42):
         x_arr = np.array(x, dtype=np.float32)
         y_arr = np.array(y)
 
-        x_min = np.min(x_arr)
-        x_max = np.max(x_arr)
-
-        # Min-Max scaling
-        x_arr = (x_arr - x_min) / (x_max - x_min + 1e-8)
-
+        x_arr = _normalise_feature_blocks(x_arr)
+        x_arr = _prepare_model_input(x_arr, model_input=model_input)
         return x_arr, y_arr
 
     def make_dataset(x, y, shuffle=True):
         ds = tf.data.Dataset.from_tensor_slices((x, y))
         if shuffle:
-            ds = ds.shuffle(len(x))
+            ds = ds.shuffle(len(x), seed=seed, reshuffle_each_iteration=True)
         return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
     # Build test set
