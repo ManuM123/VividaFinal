@@ -1,0 +1,13 @@
+services:
+  - type: web
+    runtime: docker
+    name: vivida-backend
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: VIVIDA_MODEL_PATH
+        value: /app/ml_engine/results/cnn_lstm_best.keras

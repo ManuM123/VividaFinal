@@ -26,7 +26,7 @@ def build_dataset(raw_data_path, npy_out, wav_out):
                 # --- 1. CLEAN & STANDARDIZE THE BASE AUDIO ---
                 audio, _ = librosa.load(file_path, sr=16000)
                 audio = preprocessor.apply_band_pass_filter(audio)
-                audio = preprocessor.standardise_audio_length(audio) # THIS FIXES THE SHAPE
+                audio = preprocessor.standardise_audio_length(audio) # Ensure consistent input length
                 audio = preprocessor.peak_normalisation(audio)
                 
                 # --- 2. ORIGINAL SPECTROGRAM ---
@@ -35,7 +35,6 @@ def build_dataset(raw_data_path, npy_out, wav_out):
                 
                 # --- 3. AUGMENTATION ---
                 aug_audio = augmenter.augment(audio)
-                # Save the wav so your supervisor can hear the 4-second standardized version
                 sf.write(os.path.join(wav_out, f"aug_{base_name}.wav"), aug_audio, 16000)
                 
                 # --- 4. AUGMENTED SPECTROGRAM ---

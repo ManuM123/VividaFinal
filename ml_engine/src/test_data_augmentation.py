@@ -1,19 +1,3 @@
-# import librosa
-# from data_augmentation import DataAugmentation
-# import soundfile as sf
-
-# data_augmenter = DataAugmentation()
-
-# test_audio_path = "03-01-04-02-02-01-05.wav"
-
-# audio, sr = librosa.load(test_audio_path, sr=16000)
-
-# augmented_audio = data_augmenter.augment(audio)
-
-# augmented_spectrogram = data_augmenter.apply_spec_augment(augmented_audio)
-
-# sf.write("test_data_augmentation_1.wav", augmented_audio, 16000)
-
 
 import librosa
 import numpy as np

@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("NUMBA_CACHE_DIR", "/private/tmp/numba")
+
 import librosa
 from scipy.signal import butter, filtfilt
 import numpy as np

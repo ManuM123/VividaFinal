@@ -2,12 +2,10 @@ import os
 import numpy as np
 import tensorflow as tf
 
-# Relative pathing: Go up one level from 'src', then into 'data/processed_spectrograms'
-# BASE_DIR is .../ml_engine/src/helper_functions
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Climb up 3 levels: helper_functions -> src -> ml_engine
-# Then go down into data/processed_spectrograms
+
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "data", "processed_spectrograms"))
 
 def check_data():

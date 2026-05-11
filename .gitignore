@@ -1,12 +1,48 @@
-# Data folders
-**/data/processed_spectrograms/
-**/data/augmented_audio_files/
-**/data/raw_ravdess_audio_files/
-
-# Python clutter
-__pycache__/
-*.pyc
+# Operating system files
 .DS_Store
 
-# Virtual Environment
+# Environment and secrets
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 vivida_virtual_env/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Data and generated app output
+ml_engine/data/processed_spectrograms/
+ml_engine/data/augmented_audio_files/
+ml_engine/data/raw_ravdess_audio_files/
+vivida_app/storage/
+
+# Model outputs: keep only the deployable backend model artifact
+ml_engine/results/
+!ml_engine/results/
+ml_engine/results/*
+!ml_engine/results/cnn_lstm_best.keras
+
+# Local notes
+docs/DEPLOYMENT.md
+
+# Local experiment scripts not required for the deployed app
+ml_engine/src/helper_functions/run_ast_experiment.py
