@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
-import { AppShell, Button, LotusMark } from "./shared_components";
+import { AppShell, LotusGlyph, LotusMark } from "./components";
 
 const supabase = createClient();
 
@@ -11,13 +12,12 @@ export default function HomePage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
-  const [status, setStatus] = useState("Sign in");
+  const [showIntro, setShowIntro] = useState(true);
 
   useEffect(() => {
     registerServiceWorker();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) {
-        setStatus("Sign in");
         return;
       }
 
@@ -34,15 +34,24 @@ export default function HomePage() {
     });
   }, [router]);
 
+  useEffect(() => {
+    const introTimer = window.setTimeout(() => setShowIntro(false), 4000);
+
+    return () => window.clearTimeout(introTimer);
+  }, []);
+
   async function sendMagicLink() {
     if (!email.trim()) {
       return;
     }
 
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    console.info("Vivida magic link redirect:", redirectTo);
+
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectTo,
       },
     });
 
@@ -52,34 +61,53 @@ export default function HomePage() {
   }
 
   return (
-    <AppShell title="Sign in" status={status}>
-      <section className="rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
-        <LotusMark />
-        <h2 className="mt-5 text-2xl font-black">Welcome to Vivida</h2>
-        <p className="mt-2 text-sm leading-6">
-          Sign in once and use the link sent to your email whenever you need to
-          sign back in, no password required!
-        </p>
-        <label className="mt-5 block text-sm font-black" htmlFor="email">
-          Email
-        </label>
-        <input
-          id="email"
-          className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 outline-none focus:border-[var(--lavender)] focus:ring-4 focus:ring-purple-200"
-          inputMode="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@example.com"
-        />
-        <Button
-          className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-[var(--lavender)] font-black text-white"
-          onClick={sendMagicLink}
-        >
-          Send sign-in link
-        </Button>
-        {authMessage && <p className="mt-3 text-sm">{authMessage}</p>}
-      </section>
-    </AppShell>
+    <>
+      {showIntro && <IntroSplash />}
+      <div className={showIntro ? "home-page home-page--hidden" : "home-page"}>
+        <AppShell title="Sign in">
+          <section className="rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
+            <LotusMark />
+            <h2 className="mt-5 text-2xl font-black">Welcome to Vivida</h2>
+            <p className="mt-2 text-sm leading-6">
+              Sign in once and use the link sent to your email whenever you need
+              to sign back in, no password required!
+            </p>
+            <label className="mt-5 block text-sm font-black" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 outline-none focus:border-[var(--lavender)] focus:ring-4 focus:ring-purple-200"
+              inputMode="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="name@example.com"
+            />
+            <Button
+              className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-[var(--lavender)] font-black text-white"
+              onClick={sendMagicLink}
+            >
+              Send sign-in link
+            </Button>
+            {authMessage && <p className="mt-3 text-sm">{authMessage}</p>}
+          </section>
+        </AppShell>
+      </div>
+    </>
+  );
+}
+
+function IntroSplash() {
+  return (
+    <section aria-label="Welcome to Vivida" className="intro-splash">
+      <div className="intro-splash__mark" aria-hidden="true">
+        <LotusGlyph className="h-[4.6rem] w-[4.6rem]" />
+      </div>
+      <div className="intro-splash__copy">
+        <p>Welcome to Vivida</p>
+        <h1>Your real-time support for stressful moments.</h1>
+      </div>
+    </section>
   );
 }
 

@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AudioLines, HeartPulse, Play, RotateCcw, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
 import {
   AppShell,
   BreathStage,
-  Button,
   LotusProgress,
   Metric,
-} from "../shared_components";
+} from "../components";
 import {
   AnalyseResponse,
   EMPTY_ENGAGEMENT,

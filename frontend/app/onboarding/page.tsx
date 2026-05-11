@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
-import { AppShell, Button, ScaleForm } from "../shared_components";
+import { AppShell, ScaleForm } from "../components";
 import { score } from "../static_data_and_types";
 
 const supabase = createClient();

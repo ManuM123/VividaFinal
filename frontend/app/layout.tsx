@@ -6,6 +6,9 @@ export const metadata: Metadata = {
   title: "Vivida",
   description: "A mobile-first speech-aware stress manager for self-efficacy support.",
   applicationName: "Vivida",
+  icons: {
+    icon: "/icon-192x192.png",
+  },
   manifest: "/manifest.webmanifest",
 };
 

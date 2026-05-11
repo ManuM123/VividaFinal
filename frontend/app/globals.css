@@ -133,6 +133,108 @@ button {
   padding-bottom: calc(7rem + env(safe-area-inset-bottom));
 }
 
+.home-page {
+  animation: homeEnter 520ms ease-out both;
+}
+
+.home-page--hidden {
+  display: none;
+}
+
+.intro-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at 50% 30%, rgb(255 255 255 / 68%), transparent 18rem),
+    linear-gradient(160deg, #fbf8ff 0%, var(--lavender-soft) 48%, var(--sage-soft) 100%);
+  color: var(--lavender-dark);
+  text-align: center;
+  animation: introArrive 900ms ease-out both;
+}
+
+.intro-splash__mark {
+  display: grid;
+  width: min(34vw, 9.5rem);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgb(124 95 168 / 18%);
+  border-radius: 2rem;
+  background: rgb(255 255 255 / 72%);
+  box-shadow: 0 1.5rem 4rem rgb(83 59 120 / 16%);
+  animation: introMark 1700ms cubic-bezier(0.19, 1, 0.22, 1) both;
+}
+
+.intro-splash__copy {
+  width: min(100%, 24rem);
+  margin-top: 1.75rem;
+  animation: introCopy 1300ms ease-out 520ms both;
+}
+
+.intro-splash__copy p {
+  margin: 0;
+  color: var(--lavender);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.intro-splash__copy h1 {
+  margin: 0.55rem 0 0;
+  color: var(--foreground);
+  font-size: clamp(2rem, 8vw, 3.45rem);
+  font-weight: 950;
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+@keyframes introArrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes introMark {
+  from {
+    opacity: 0;
+    transform: translateY(1.1rem) scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes introCopy {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes homeEnter {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

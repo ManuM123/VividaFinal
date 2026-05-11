@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
-import { AppShell, Button, LotusMark, Metric } from "../shared_components";
+import { AppShell, LotusMark, Metric } from "../components";
 import {
   EMPTY_ENGAGEMENT,
   EngagementSummary,
