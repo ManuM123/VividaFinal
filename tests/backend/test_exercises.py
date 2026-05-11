@@ -1,4 +1,4 @@
-from vivida_app.backend.exercises import EXERCISES, build_guidance
+from backend.exercises import EXERCISES, build_guidance
 
 
 def test_each_state_has_structured_exercise_metadata():

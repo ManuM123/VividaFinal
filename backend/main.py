@@ -11,12 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from vivida_app.backend.exercises import build_guidance
-from vivida_app.backend.inference import ModelUnavailableError, VividaInferenceEngine
+from backend.exercises import build_guidance
+from backend.inference import ModelUnavailableError, VividaInferenceEngine
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-FRONTEND_DIR = ROOT_DIR / "vivida_app" / "frontend"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+FRONTEND_DIR = ROOT_DIR / "frontend"
 
 app = FastAPI(title="Vivida API", version="0.2.0")
 app.add_middleware(

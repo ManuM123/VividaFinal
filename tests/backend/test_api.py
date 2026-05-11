@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from vivida_app.backend import main
+from backend import main
 
 
 class FakeEngine:

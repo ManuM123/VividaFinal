@@ -33,7 +33,6 @@ yarn-error.log*
 ml_engine/data/processed_spectrograms/
 ml_engine/data/augmented_audio_files/
 ml_engine/data/raw_ravdess_audio_files/
-vivida_app/storage/
 
 # Model outputs: keep only the deployable backend model artifact
 ml_engine/results/

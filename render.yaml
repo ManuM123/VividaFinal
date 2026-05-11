@@ -2,7 +2,7 @@ services:
   - type: web
     runtime: docker
     name: vivida-backend
-    plan: starter
+    plan: standard
     region: frankfurt
     dockerfilePath: ./Dockerfile.backend
     dockerContext: .
