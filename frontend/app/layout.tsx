@@ -6,11 +6,6 @@ export const metadata: Metadata = {
   title: "Vivida",
   description: "A mobile-first speech-aware stress manager for self-efficacy support.",
   applicationName: "Vivida",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Vivida",
-  },
   manifest: "/manifest.webmanifest",
 };
 

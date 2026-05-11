@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: vivida-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     name: Frontend lint and build
@@ -42,6 +46,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run backend tests
         run: pytest tests/backend
+      - name: Verify backend app import
+        run: python -c "from backend.main import app; print(app.title)"
 
   docker:
     name: Docker build check
