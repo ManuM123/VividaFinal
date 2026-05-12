@@ -8,6 +8,7 @@ import re
 import time
 import wave
 from copy import deepcopy
+from dataclasses import dataclass
 
 import httpx
 
@@ -21,6 +22,19 @@ GEMINI_PCM_CHANNELS = 1
 GEMINI_PCM_SAMPLE_WIDTH = 2
 GEMINI_TTS_MAX_CHARS = 1800
 GEMINI_TTS_RETRIES = 2
+
+ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
+ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
+ELEVENLABS_TTS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
+ELEVENLABS_TTS_RETRIES = 2
+
+
+@dataclass(frozen=True)
+class SynthesizedAudio:
+    content: bytes
+    media_type: str
+    provider: str
 
 
 EXERCISES = {
@@ -245,11 +259,66 @@ async def personalise_guidance(
         return fallback
 
 
-async def synthesize_guidance_audio(text: str) -> bytes:
+async def synthesize_guidance_audio(text: str) -> SynthesizedAudio:
     script = _clean_generated_text(text, max_length=GEMINI_TTS_MAX_CHARS)
     if not script:
         raise ValueError("No guidance text supplied")
 
+    provider = tts_provider_name()
+    if provider == "elevenlabs":
+        return await _synthesize_elevenlabs_audio(script)
+    if provider == "gemini":
+        return await _synthesize_gemini_audio(script)
+    raise ValueError("No TTS provider is configured")
+
+
+def tts_provider_name() -> str:
+    configured = os.getenv("VIVIDA_TTS_PROVIDER", "").strip().lower()
+    if configured in {"elevenlabs", "gemini"}:
+        return configured
+    if os.getenv("ELEVENLABS_API_KEY"):
+        return "elevenlabs"
+    if os.getenv("GEMINI_API_KEY"):
+        return "gemini"
+    return "browser_fallback"
+
+
+async def _synthesize_elevenlabs_audio(script: str) -> SynthesizedAudio:
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise ValueError("ELEVENLABS_API_KEY is not set")
+
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", ELEVENLABS_TTS_VOICE_ID)
+    model = os.getenv("ELEVENLABS_TTS_MODEL", ELEVENLABS_TTS_MODEL)
+    output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", ELEVENLABS_OUTPUT_FORMAT)
+    payload = {
+        "text": script,
+        "model_id": model,
+        "voice_settings": {
+            "stability": float(os.getenv("ELEVENLABS_STABILITY", "0.55")),
+            "similarity_boost": float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.75")),
+            "style": float(os.getenv("ELEVENLABS_STYLE", "0.1")),
+            "use_speaker_boost": os.getenv("ELEVENLABS_SPEAKER_BOOST", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "off"},
+        },
+    }
+
+    audio = await _post_elevenlabs_tts_with_retry(
+        api_key=api_key,
+        voice_id=voice_id,
+        output_format=output_format,
+        payload=payload,
+    )
+    return SynthesizedAudio(
+        content=audio,
+        media_type=_media_type_for_elevenlabs_format(output_format),
+        provider="elevenlabs",
+    )
+
+
+async def _synthesize_gemini_audio(script: str) -> SynthesizedAudio:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not set")
@@ -299,8 +368,16 @@ async def synthesize_guidance_audio(text: str) -> bytes:
     audio_bytes = base64.b64decode(inline_data["data"])
     mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or ""
     if "wav" in mime_type:
-        return audio_bytes
-    return _pcm_to_wav(audio_bytes)
+        return SynthesizedAudio(
+            content=audio_bytes,
+            media_type="audio/wav",
+            provider="gemini",
+        )
+    return SynthesizedAudio(
+        content=_pcm_to_wav(audio_bytes),
+        media_type="audio/wav",
+        provider="gemini",
+    )
 
 
 def _clean_name(first_name: str) -> str:
@@ -432,6 +509,40 @@ async def _post_gemini_tts_with_retry(
     raise last_error or ValueError("Gemini TTS request failed")
 
 
+async def _post_elevenlabs_tts_with_retry(
+    *,
+    api_key: str,
+    voice_id: str,
+    output_format: str,
+    payload: dict,
+) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(ELEVENLABS_TTS_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    f"{ELEVENLABS_TTS_URL}/{voice_id}",
+                    params={"output_format": output_format},
+                    headers={
+                        "xi-api-key": api_key,
+                        "Content-Type": "application/json",
+                        "Accept": _media_type_for_elevenlabs_format(output_format),
+                    },
+                    json=payload,
+                )
+            response.raise_for_status()
+            if not response.content:
+                raise ValueError("ElevenLabs TTS returned empty audio")
+            return response.content
+        except Exception as exc:
+            last_error = exc
+            if not _should_retry_elevenlabs_tts(exc, attempt):
+                break
+            time.sleep(0.25 * (attempt + 1))
+
+    raise last_error or ValueError("ElevenLabs TTS request failed")
+
+
 def _should_retry_tts(exc: Exception, attempt: int) -> bool:
     if attempt >= GEMINI_TTS_RETRIES:
         return False
@@ -440,6 +551,28 @@ def _should_retry_tts(exc: Exception, attempt: int) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in {429, 500, 502, 503, 504}
     return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
+
+
+def _should_retry_elevenlabs_tts(exc: Exception, attempt: int) -> bool:
+    if attempt >= ELEVENLABS_TTS_RETRIES:
+        return False
+    if isinstance(exc, ValueError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {429, 500, 502, 503, 504}
+    return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
+
+
+def _media_type_for_elevenlabs_format(output_format: str) -> str:
+    if output_format.startswith("mp3"):
+        return "audio/mpeg"
+    if output_format.startswith("wav"):
+        return "audio/wav"
+    if output_format.startswith("pcm"):
+        return "audio/L16"
+    if output_format.startswith("ulaw"):
+        return "audio/basic"
+    return "application/octet-stream"
 
 
 def _parse_json_text(text: str) -> dict:

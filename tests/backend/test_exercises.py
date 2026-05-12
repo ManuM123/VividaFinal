@@ -1,5 +1,6 @@
 import asyncio
 
+from backend import exercises
 from backend.exercises import EXERCISES, build_guidance, personalise_guidance
 
 
@@ -94,3 +95,19 @@ def test_personalisation_is_static_without_provider(monkeypatch):
 
     assert personalised["personalisation_source"] == "static"
     assert personalised["title"] == "Find Your Soothing Rhythm"
+
+
+def test_tts_provider_prefers_elevenlabs_when_configured(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-elevenlabs-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.delenv("VIVIDA_TTS_PROVIDER", raising=False)
+
+    assert exercises.tts_provider_name() == "elevenlabs"
+
+
+def test_tts_provider_can_force_gemini(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-elevenlabs-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("VIVIDA_TTS_PROVIDER", "gemini")
+
+    assert exercises.tts_provider_name() == "gemini"

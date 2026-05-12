@@ -17,7 +17,13 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend.exercises import build_guidance, personalise_guidance, synthesize_guidance_audio
+from backend.exercises import (
+    SynthesizedAudio,
+    build_guidance,
+    personalise_guidance,
+    synthesize_guidance_audio,
+    tts_provider_name,
+)
 from backend.inference import ModelUnavailableError, VividaInferenceEngine
 
 
@@ -80,7 +86,7 @@ def health() -> dict:
         "model_path": str(engine.model_path) if engine.model_path else None,
         "classifier": engine._classifier_name() if engine.model is not None else None,
         "audio_storage": "ephemeral",
-        "tts": "gemini" if os.getenv("GEMINI_API_KEY") else "browser_fallback",
+        "tts": tts_provider_name(),
         "push_notifications": "configured" if _vapid_public_key() else "missing_vapid",
     }
 
@@ -194,17 +200,29 @@ async def tts(request: Request, payload: TTSRequest) -> Response:
         raise HTTPException(status_code=413, detail="TTS text is too long.")
 
     try:
-        audio = await synthesize_guidance_audio(payload.text)
+        audio_result = await synthesize_guidance_audio(payload.text)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Gemini TTS unavailable: {exc.__class__.__name__}",
+            detail=f"TTS unavailable: {exc.__class__.__name__}",
         ) from exc
+
+    if isinstance(audio_result, SynthesizedAudio):
+        audio = audio_result.content
+        media_type = audio_result.media_type
+        provider = audio_result.provider
+    else:
+        audio = audio_result
+        media_type = "audio/wav"
+        provider = "legacy"
 
     return Response(
         content=audio,
-        media_type="audio/wav",
-        headers={"Cache-Control": "no-store"},
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Vivida-TTS-Provider": provider,
+        },
     )
 
 
