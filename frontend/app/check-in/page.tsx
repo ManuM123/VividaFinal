@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AudioLines, HeartPulse, Play, RotateCcw, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { createClient } from "@/utils/supabase/client";
 import {
-  AppShell,
-  BreathStage,
-  LotusProgress,
-  Metric,
-} from "../components";
+  AudioLines,
+  HeartPulse,
+  Play,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "@/app/components/ui/button";
+import { createClient } from "@/utils/supabase/client";
+import { AppShell, BreathStage, LotusProgress, Metric } from "../components";
 import {
   AnalyseResponse,
   EMPTY_ENGAGEMENT,
@@ -33,7 +34,8 @@ declare global {
 }
 
 const supabase = createClient();
-const ML_API_URL = process.env.NEXT_PUBLIC_ML_API_URL || "http://127.0.0.1:8000";
+const ML_API_URL =
+  process.env.NEXT_PUBLIC_ML_API_URL || "http://127.0.0.1:8000";
 const CONSENT_KEY = "vivida_voice_consent_v1";
 
 export default function CheckInPage() {
@@ -46,12 +48,17 @@ export default function CheckInPage() {
   const [result, setResult] = useState<AnalyseResponse | null>(null);
   const [savedCheckInId, setSavedCheckInId] = useState<string | null>(null);
   const [feedbackScore, setFeedbackScore] = useState<number | null>(null);
-  const [hoveredFeedbackScore, setHoveredFeedbackScore] = useState<number | null>(null);
+  const [hoveredFeedbackScore, setHoveredFeedbackScore] = useState<
+    number | null
+  >(null);
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [hasVoiceConsent, setHasVoiceConsent] = useState(
-    () => typeof window !== "undefined" && window.localStorage.getItem(CONSENT_KEY) === "accepted",
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(CONSENT_KEY) === "accepted",
   );
-  const [engagement, setEngagement] = useState<EngagementSummary>(EMPTY_ENGAGEMENT);
+  const [engagement, setEngagement] =
+    useState<EngagementSummary>(EMPTY_ENGAGEMENT);
   const [streakDates, setStreakDates] = useState<string[]>([]);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -72,7 +79,10 @@ export default function CheckInPage() {
         .select("activity_date, check_in_count, completed_exercise_count")
         .eq("user_id", activeUserId)
         .order("activity_date", { ascending: false }),
-      supabase.from("exercise_feedback").select("helpfulness_score").eq("user_id", activeUserId),
+      supabase
+        .from("exercise_feedback")
+        .select("helpfulness_score")
+        .eq("user_id", activeUserId),
       supabase.from("check_ins").select("id").eq("user_id", activeUserId),
       supabase
         .from("user_profile")
@@ -81,9 +91,14 @@ export default function CheckInPage() {
         .maybeSingle(),
     ]);
 
-    const todayActivity = activityRows?.find((row) => row.activity_date === today);
+    const todayActivity = activityRows?.find(
+      (row) => row.activity_date === today,
+    );
     const starsEarned =
-      feedbackRows?.reduce((sum, row) => sum + Number(row.helpfulness_score || 0), 0) || 0;
+      feedbackRows?.reduce(
+        (sum, row) => sum + Number(row.helpfulness_score || 0),
+        0,
+      ) || 0;
     const exercisesRated = feedbackRows?.length || 0;
     const dates = parseDateList(profile?.streak_dates);
 
@@ -365,14 +380,20 @@ export default function CheckInPage() {
     }
     window.speechSynthesis.cancel();
     vibrate(result.guidance.haptics || [20, 40, 20]);
-    const utterance = new SpeechSynthesisUtterance(result.guidance.voice_script);
+    const utterance = new SpeechSynthesisUtterance(
+      result.guidance.voice_script,
+    );
     utterance.rate = 0.92;
     utterance.pitch = 0.96;
     window.speechSynthesis.speak(utterance);
   }
 
   return (
-    <AppShell title={result ? "Guided reset" : "Voice check-in"} status={status} showNav>
+    <AppShell
+      title={result ? "Guided reset" : "Check-in"}
+      status={status}
+      showNav
+    >
       {!result && (
         <section className="grid gap-4 rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
           <LotusProgress engagement={engagement} />
@@ -382,10 +403,9 @@ export default function CheckInPage() {
                 Voice privacy
               </p>
               <p className="mt-2 text-sm leading-6">
-                Vivida sends your recording to the ML backend only for emotion
+                Vivida only uses any recordings for emotion
                 analysis. The raw audio is deleted after processing; the app
-                stores only the predicted emotion, state, confidence, latency,
-                and your exercise feedback.
+                does not store any sensitive data
               </p>
               <Button
                 className="mt-3 h-11 w-full rounded-lg bg-[var(--sage)] font-black text-white"
@@ -399,7 +419,10 @@ export default function CheckInPage() {
               </Button>
             </div>
           )}
-          <BreathStage active={isRecording} label={isRecording ? "Recording" : "Ready"} />
+          <BreathStage
+            active={isRecording}
+            label={isRecording ? "Recording" : "Ready"}
+          />
           {transcript && (
             <p className="rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 text-sm leading-6">
               {transcript}
@@ -420,22 +443,37 @@ export default function CheckInPage() {
 
       {result && (
         <section className="grid gap-4 rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
-          <div className={`rounded-lg p-4 ${stateClass(result.prediction.state.key)}`}>
+          <div
+            className={`rounded-lg p-4 ${stateClass(result.prediction.state.key)}`}
+          >
             <p className="text-xs font-black uppercase">Detected state</p>
-            <h2 className="mt-1 text-3xl font-black">{result.prediction.state.name}</h2>
+            <h2 className="mt-1 text-3xl font-black">
+              {result.prediction.state.name}
+            </h2>
             <p className="mt-2 leading-6">{result.prediction.state.summary}</p>
           </div>
 
           <div className="grid grid-cols-3 gap-2 max-[460px]:grid-cols-1">
-            <Metric label="Emotion" value={titleCase(result.prediction.emotion)} />
-            <Metric label="Confidence" value={`${Math.round(result.prediction.confidence * 100)}%`} />
-            <Metric label="Latency" value={`${Math.round(result.prediction.latency_ms)} ms`} />
+            <Metric
+              label="Emotion"
+              value={titleCase(result.prediction.emotion)}
+            />
+            <Metric
+              label="Confidence"
+              value={`${Math.round(result.prediction.confidence * 100)}%`}
+            />
+            <Metric
+              label="Latency"
+              value={`${Math.round(result.prediction.latency_ms)} ms`}
+            />
           </div>
 
           <ExerciseGuide result={result} />
 
           <div className="rounded-lg border border-[var(--line)] p-4">
-            <p className="text-xs font-black uppercase">How helpful was this?</p>
+            <p className="text-xs font-black uppercase">
+              How helpful was this?
+            </p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               {[1, 2, 3].map((value) => (
                 <Button
@@ -502,7 +540,9 @@ function ExerciseGuide({ result }: { result: AnalyseResponse }) {
     <div className="rounded-lg border border-[var(--line)] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase text-[var(--lavender)]">Exercise</p>
+          <p className="text-xs font-black uppercase text-[var(--lavender)]">
+            Exercise
+          </p>
           <h2 className="mt-1 text-2xl font-black">{result.guidance.title}</h2>
           {result.guidance.subtitle && (
             <p className="mt-2 text-sm font-bold leading-5 text-[var(--muted-foreground)]">
@@ -585,7 +625,9 @@ function ExerciseMotion({
 
   return (
     <div className="mt-4 grid h-44 place-items-center rounded-lg bg-[linear-gradient(160deg,var(--lavender-soft),#f7fbf5)]">
-      <div className={`relative grid h-28 w-28 place-items-center rounded-full border-2 ${variant}`}>
+      <div
+        className={`relative grid h-28 w-28 place-items-center rounded-full border-2 ${variant}`}
+      >
         {animation === "two_voice_shift" && (
           <span className="absolute -left-7 h-10 w-10 rounded-full bg-[var(--lotus)]/75" />
         )}

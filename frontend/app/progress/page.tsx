@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/app/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
 import { AppShell, LotusMark, Metric } from "../components";
 import {
@@ -17,7 +17,8 @@ const supabase = createClient();
 
 export default function ProgressPage() {
   const router = useRouter();
-  const [engagement, setEngagement] = useState<EngagementSummary>(EMPTY_ENGAGEMENT);
+  const [engagement, setEngagement] =
+    useState<EngagementSummary>(EMPTY_ENGAGEMENT);
   const [status, setStatus] = useState("Loading");
   const [remindersEnabled, setRemindersEnabled] = useState(false);
 
@@ -34,7 +35,10 @@ export default function ProgressPage() {
         .select("activity_date, check_in_count, completed_exercise_count")
         .eq("user_id", userId)
         .order("activity_date", { ascending: false }),
-      supabase.from("exercise_feedback").select("helpfulness_score").eq("user_id", userId),
+      supabase
+        .from("exercise_feedback")
+        .select("helpfulness_score")
+        .eq("user_id", userId),
       supabase.from("check_ins").select("id").eq("user_id", userId),
       supabase
         .from("user_profile")
@@ -43,9 +47,14 @@ export default function ProgressPage() {
         .maybeSingle(),
     ]);
 
-    const todayActivity = activityRows?.find((row) => row.activity_date === today);
+    const todayActivity = activityRows?.find(
+      (row) => row.activity_date === today,
+    );
     const starsEarned =
-      feedbackRows?.reduce((sum, row) => sum + Number(row.helpfulness_score || 0), 0) || 0;
+      feedbackRows?.reduce(
+        (sum, row) => sum + Number(row.helpfulness_score || 0),
+        0,
+      ) || 0;
     const exercisesRated = feedbackRows?.length || 0;
     const dates = parseDateList(profile?.streak_dates);
 
@@ -66,7 +75,9 @@ export default function ProgressPage() {
         router.replace("/");
         return;
       }
-      setRemindersEnabled(window.localStorage.getItem("vivida_reminders") === "enabled");
+      setRemindersEnabled(
+        window.localStorage.getItem("vivida_reminders") === "enabled",
+      );
       await loadEngagement(data.user.id);
     });
   }, [loadEngagement, router]);
@@ -112,8 +123,14 @@ export default function ProgressPage() {
             label="Today"
             value={`${engagement.todayCheckIns} check-in${engagement.todayCheckIns === 1 ? "" : "s"}`}
           />
-          <Metric label="Total check-ins" value={`${engagement.totalCheckIns}`} />
-          <Metric label="Stars" value={`${engagement.starsEarned}/${engagement.maxStars || 0}`} />
+          <Metric
+            label="Total check-ins"
+            value={`${engagement.totalCheckIns}`}
+          />
+          <Metric
+            label="Stars"
+            value={`${engagement.starsEarned}/${engagement.maxStars || 0}`}
+          />
         </div>
         <Button
           className="h-12 rounded-lg bg-[var(--sage)] font-black text-white"

@@ -133,6 +133,10 @@ button {
   padding-bottom: calc(7rem + env(safe-area-inset-bottom));
 }
 
+.app-shell-enter {
+  animation: pageEnter 720ms ease-out both;
+}
+
 .home-page {
   animation: homeEnter 520ms ease-out both;
 }
@@ -228,6 +232,17 @@ button {
   from {
     opacity: 0;
     transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(0.9rem);
   }
   to {
     opacity: 1;
