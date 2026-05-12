@@ -121,11 +121,19 @@ def test_notification_subscribe_stores_subscription(monkeypatch):
     async def fake_user(request):
         return {"id": "user-123"}
 
-    async def fake_supabase_request(method, path, *, body=None, prefer=None):
+    async def fake_supabase_request(
+        method,
+        path,
+        *,
+        body=None,
+        prefer=None,
+        access_token=None,
+    ):
         captured["method"] = method
         captured["path"] = path
         captured["body"] = body
         captured["prefer"] = prefer
+        captured["access_token"] = access_token
         return {}
 
     monkeypatch.setattr(main, "_require_supabase_user", fake_user)
@@ -151,6 +159,7 @@ def test_notification_subscribe_stores_subscription(monkeypatch):
     assert captured["body"]["user_id"] == "user-123"
     assert captured["body"]["enabled"] is True
     assert captured["body"]["motivation_enabled"] is True
+    assert captured["access_token"] == "test-token"
     assert 9 <= captured["body"]["motivation_hour_utc"] <= 20
 
 

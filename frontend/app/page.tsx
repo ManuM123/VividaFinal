@@ -11,9 +11,12 @@ const supabase = createClient();
 export default function HomePage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authMessage, setAuthMessage] = useState("");
   const [showIntro, setShowIntro] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRedirect, setPendingRedirect] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,16 +29,7 @@ export default function HomePage() {
           return;
         }
 
-        const { data: assessment } = await supabase
-          .from("gse_assessments")
-          .select("score")
-          .eq("user_id", data.user.id)
-          .eq("phase", "baseline")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        setPendingRedirect(assessment ? "/check-in" : "/onboarding");
+        await openAppForUser(data.user.id);
         setAuthChecked(true);
       })
       .catch(() => {
@@ -45,7 +39,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const introTimer = window.setTimeout(() => setShowIntro(false), 1800);
+    const introTimer = window.setTimeout(() => setShowIntro(false), 2800);
 
     return () => window.clearTimeout(introTimer);
   }, []);
@@ -56,39 +50,81 @@ export default function HomePage() {
     }
   }, [pendingRedirect, router, showIntro]);
 
-  async function sendMagicLink() {
-    if (!email.trim()) {
+  async function openAppForUser(userId: string) {
+    const { data: assessment } = await supabase
+      .from("gse_assessments")
+      .select("score")
+      .eq("user_id", userId)
+      .eq("phase", "baseline")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    setShowIntro(false);
+    setPendingRedirect(assessment ? "/check-in" : "/onboarding");
+  }
+
+  async function submitAuth() {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
+      setAuthMessage("Enter your email and password.");
       return;
     }
 
-    const redirectTo = `${window.location.origin}/auth/callback`;
+    if (password.length < 6) {
+      setAuthMessage("Password must be at least 6 characters.");
+      return;
+    }
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: redirectTo,
-      },
-    });
+    setIsSubmitting(true);
+    setAuthMessage("");
 
-    setAuthMessage(
-      error ? error.message : "Check your email for the Vivida sign-in link.",
-    );
+    const result =
+      authMode === "signup"
+        ? await supabase.auth.signUp({
+            email: cleanEmail,
+            password,
+          })
+        : await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+    setIsSubmitting(false);
+
+    if (result.error) {
+      setAuthMessage(result.error.message);
+      return;
+    }
+
+    if (!result.data.session || !result.data.user) {
+      setAuthMessage(
+        "Account created. If Vivida does not open, disable email confirmation in Supabase Auth settings and try logging in.",
+      );
+      return;
+    }
+
+    await openAppForUser(result.data.user.id);
   }
 
   return (
     <>
-      {showIntro && <IntroSplash onContinue={() => setShowIntro(false)} />}
+      {showIntro && <IntroSplash />}
       <div className={showIntro ? "home-page home-page--hidden" : "home-page"}>
         <AppShell title={pendingRedirect ? "Opening Vivida" : "Sign in"}>
           {pendingRedirect ? (
             <OpeningCard />
           ) : (
             <SignInCard
+              authMode={authMode}
               authMessage={authMessage}
               email={email}
+              password={password}
+              onAuthModeChange={setAuthMode}
               onEmailChange={setEmail}
-              onSendMagicLink={sendMagicLink}
-              disabled={!authChecked}
+              onPasswordChange={setPassword}
+              onSubmit={submitAuth}
+              disabled={!authChecked || isSubmitting}
             />
           )}
         </AppShell>
@@ -110,50 +146,110 @@ function OpeningCard() {
 }
 
 function SignInCard({
+  authMode,
   authMessage,
   disabled,
   email,
+  password,
+  onAuthModeChange,
   onEmailChange,
-  onSendMagicLink,
+  onPasswordChange,
+  onSubmit,
 }: {
+  authMode: "login" | "signup";
   authMessage: string;
   disabled: boolean;
   email: string;
+  password: string;
+  onAuthModeChange: (mode: "login" | "signup") => void;
   onEmailChange: (email: string) => void;
-  onSendMagicLink: () => void;
+  onPasswordChange: (password: string) => void;
+  onSubmit: () => void;
 }) {
   return (
     <section className="rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
       <LotusMark />
       <h2 className="mt-5 text-2xl font-black">Welcome to Vivida</h2>
       <p className="mt-2 text-sm leading-6">
-        Sign in once and use the link sent to your email whenever you need to
-        sign back in, no password required!
+        Create an account or log back in with your email and password.
       </p>
-      <label className="mt-5 block text-sm font-black" htmlFor="email">
-        Email
-      </label>
-      <input
-        id="email"
-        className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 outline-none focus:border-[var(--lavender)] focus:ring-4 focus:ring-purple-200"
-        inputMode="email"
-        value={email}
-        onChange={(event) => onEmailChange(event.target.value)}
-        placeholder="name@example.com"
-      />
-      <Button
-        className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-[var(--lavender)] font-black text-white disabled:opacity-50"
-        disabled={disabled}
-        onClick={onSendMagicLink}
+      <div className="mt-5 grid grid-cols-2 rounded-lg border border-[var(--line)] bg-[#fffcff] p-1">
+        <button
+          className={`h-10 rounded-md text-sm font-black ${
+            authMode === "signup"
+              ? "bg-[var(--lavender)] text-white"
+              : "text-[var(--lavender-dark)]"
+          }`}
+          type="button"
+          onClick={() => {
+            onAuthModeChange("signup");
+          }}
+        >
+          Sign up
+        </button>
+        <button
+          className={`h-10 rounded-md text-sm font-black ${
+            authMode === "login"
+              ? "bg-[var(--lavender)] text-white"
+              : "text-[var(--lavender-dark)]"
+          }`}
+          type="button"
+          onClick={() => {
+            onAuthModeChange("login");
+          }}
+        >
+          Log in
+        </button>
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!disabled) {
+            onSubmit();
+          }
+        }}
       >
-        Send sign-in link
-      </Button>
+        <label className="mt-5 block text-sm font-black" htmlFor="email">
+          Email
+        </label>
+        <input
+          id="email"
+          className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 outline-none focus:border-[var(--lavender)] focus:ring-4 focus:ring-purple-200"
+          autoComplete="email"
+          inputMode="email"
+          type="email"
+          value={email}
+          onChange={(event) => onEmailChange(event.target.value)}
+          placeholder="name@example.com"
+        />
+        <label className="mt-4 block text-sm font-black" htmlFor="password">
+          Password
+        </label>
+        <input
+          id="password"
+          className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[#fffcff] px-4 py-3 outline-none focus:border-[var(--lavender)] focus:ring-4 focus:ring-purple-200"
+          autoComplete={
+            authMode === "signup" ? "new-password" : "current-password"
+          }
+          type="password"
+          value={password}
+          onChange={(event) => onPasswordChange(event.target.value)}
+          placeholder="At least 6 characters"
+        />
+        <Button
+          className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-[var(--lavender)] font-black text-white disabled:opacity-50"
+          disabled={disabled}
+          type="submit"
+        >
+          {authMode === "signup" ? "Create account" : "Log in"}
+        </Button>
+      </form>
       {authMessage && <p className="mt-3 text-sm">{authMessage}</p>}
     </section>
   );
 }
 
-function IntroSplash({ onContinue }: { onContinue: () => void }) {
+function IntroSplash() {
   return (
     <section aria-label="Welcome to Vivida" className="intro-splash">
       <div className="intro-splash__mark" aria-hidden="true">
@@ -162,12 +258,6 @@ function IntroSplash({ onContinue }: { onContinue: () => void }) {
       <div className="intro-splash__copy">
         <p>Welcome to Vivida</p>
         <h1>Your real-time support for stressful moments.</h1>
-        <Button
-          className="mt-6 h-12 rounded-lg bg-[var(--lavender)] px-6 font-black text-white"
-          onClick={onContinue}
-        >
-          Continue
-        </Button>
       </div>
     </section>
   );

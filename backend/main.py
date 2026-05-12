@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib")
 
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -38,6 +39,7 @@ def _load_local_env(path: Path) -> None:
 ROOT_DIR = Path(__file__).resolve().parents[1]
 _load_local_env(ROOT_DIR / ".env")
 FRONTEND_DIR = ROOT_DIR / "frontend"
+_load_local_env(FRONTEND_DIR / ".env.local")
 DEBUG_AUDIO_DIR = Path(os.getenv("VIVIDA_DEBUG_AUDIO_DIR", ROOT_DIR / "debug_audio"))
 TTS_RATE_LIMIT = int(os.getenv("VIVIDA_TTS_RATE_LIMIT", "6"))
 TTS_RATE_WINDOW_SECONDS = int(os.getenv("VIVIDA_TTS_RATE_WINDOW_SECONDS", "3600"))
@@ -221,6 +223,7 @@ async def subscribe_notifications(
     payload: NotificationSubscriptionRequest,
 ) -> dict:
     user = await _require_supabase_user(request)
+    token = _supabase_bearer_token(request)
     subscription = payload.subscription
     endpoint = subscription.get("endpoint")
     keys = subscription.get("keys") or {}
@@ -249,6 +252,7 @@ async def subscribe_notifications(
             "updated_at": _now(),
         },
         prefer="resolution=merge-duplicates,return=minimal",
+        access_token=token,
     )
     return {"ok": True, "reminder_hour_utc": reminder_hour}
 
@@ -259,6 +263,7 @@ async def unsubscribe_notifications(
     payload: NotificationUnsubscribeRequest,
 ) -> dict:
     user = await _require_supabase_user(request)
+    token = _supabase_bearer_token(request)
     await _supabase_request(
         "PATCH",
         (
@@ -267,6 +272,7 @@ async def unsubscribe_notifications(
         ),
         body={"enabled": False, "updated_at": _now()},
         prefer="return=minimal",
+        access_token=token,
     )
     return {"ok": True}
 
@@ -274,7 +280,8 @@ async def unsubscribe_notifications(
 @app.post("/api/notifications/test")
 async def test_notification(request: Request) -> dict:
     user = await _require_supabase_user(request)
-    subscriptions = await _list_user_push_subscriptions(user["id"])
+    token = _supabase_bearer_token(request)
+    subscriptions = await _list_user_push_subscriptions(user["id"], token)
     if not subscriptions:
         raise HTTPException(status_code=404, detail="No active push subscription.")
 
@@ -285,8 +292,12 @@ async def test_notification(request: Request) -> dict:
             title="Vivida is here",
             message="Your gentle reminder is ready. One small check-in is enough.",
             tag="vivida-test",
+            access_token=token,
         ):
             sent += 1
+
+    if sent == 0:
+        raise HTTPException(status_code=502, detail="No active push endpoint accepted the test.")
 
     return {"ok": True, "sent": sent}
 
@@ -407,6 +418,13 @@ def _vapid_claim_email() -> str:
     return os.getenv("VAPID_CLAIM_EMAIL", "admin@vivida.app").strip()
 
 
+def _vapid_claim_subject() -> str:
+    claim = _vapid_claim_email()
+    if claim.startswith(("mailto:", "https://", "http://")):
+        return claim
+    return f"mailto:{claim}"
+
+
 def _supabase_url() -> str:
     return os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
 
@@ -416,10 +434,14 @@ def _supabase_service_key() -> str:
 
 
 def _supabase_auth_key() -> str:
-    return os.getenv("SUPABASE_ANON_KEY") or _supabase_service_key()
+    return (
+        os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        or _supabase_service_key()
+    )
 
 
-async def _require_supabase_user(request: Request) -> dict:
+def _supabase_bearer_token(request: Request) -> str:
     auth_header = request.headers.get("authorization", "")
     if not auth_header.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing Supabase session.")
@@ -427,6 +449,11 @@ async def _require_supabase_user(request: Request) -> dict:
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing Supabase session.")
+    return token
+
+
+async def _require_supabase_user(request: Request) -> dict:
+    token = _supabase_bearer_token(request)
 
     supabase_url = _supabase_url()
     auth_key = _supabase_auth_key()
@@ -471,15 +498,21 @@ async def _supabase_request(
     *,
     body: object | None = None,
     prefer: str | None = None,
+    access_token: str | None = None,
 ) -> object:
     supabase_url = _supabase_url()
-    service_key = _supabase_service_key()
-    if not supabase_url or not service_key:
-        raise HTTPException(status_code=503, detail="Supabase service access is not configured.")
+    api_key = _supabase_auth_key() if access_token else _supabase_service_key()
+    if not supabase_url or not api_key:
+        detail = (
+            "Supabase auth is not configured."
+            if access_token
+            else "Supabase service access is not configured."
+        )
+        raise HTTPException(status_code=503, detail=detail)
 
     headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
+        "apikey": api_key,
+        "Authorization": f"Bearer {access_token or api_key}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -507,7 +540,10 @@ def _rest_filter_value(value: str) -> str:
     return quote(value, safe="")
 
 
-async def _list_user_push_subscriptions(user_id: str) -> list[dict]:
+async def _list_user_push_subscriptions(
+    user_id: str,
+    access_token: str | None = None,
+) -> list[dict]:
     result = await _supabase_request(
         "GET",
         (
@@ -515,6 +551,7 @@ async def _list_user_push_subscriptions(user_id: str) -> list[dict]:
             "?select=id,user_id,endpoint,p256dh,auth,subscription"
             f"&user_id=eq.{user_id}&enabled=eq.true"
         ),
+        access_token=access_token,
     )
     return result if isinstance(result, list) else []
 
@@ -598,12 +635,16 @@ async def _mark_motivation_sent(subscription_id: str, sent_date: str) -> None:
     )
 
 
-async def _disable_push_subscription(subscription_id: str) -> None:
+async def _disable_push_subscription(
+    subscription_id: str,
+    access_token: str | None = None,
+) -> None:
     await _supabase_request(
         "PATCH",
         f"/rest/v1/push_subscriptions?id=eq.{subscription_id}",
         body={"enabled": False, "updated_at": _now()},
         prefer="return=minimal",
+        access_token=access_token,
     )
 
 
@@ -613,6 +654,7 @@ async def _send_subscription_notification(
     title: str,
     message: str,
     tag: str,
+    access_token: str | None = None,
 ) -> bool:
     if not _vapid_public_key() or not _vapid_private_key():
         raise HTTPException(status_code=503, detail="VAPID keys are not configured.")
@@ -641,16 +683,20 @@ async def _send_subscription_notification(
             subscription_info=subscription_info,
             data=payload,
             vapid_private_key=_vapid_private_key(),
-            vapid_claims={"sub": f"mailto:{_vapid_claim_email()}"},
+            vapid_claims={"sub": _vapid_claim_subject()},
         )
         return True
     except Exception as exc:
         if exc.__class__.__name__ == "WebPushException":
             response = getattr(exc, "response", None)
-            if getattr(response, "status_code", None) in {404, 410} and subscription.get("id"):
-                await _disable_push_subscription(subscription["id"])
-                return False
-        raise HTTPException(status_code=502, detail="Push send failed.") from exc
+            status_code = getattr(response, "status_code", None)
+            if status_code in {400, 401, 403, 404, 410} and subscription.get("id"):
+                await _disable_push_subscription(subscription["id"], access_token)
+            return False
+        raise HTTPException(
+            status_code=502,
+            detail=f"Push send failed: {exc.__class__.__name__}",
+        ) from exc
 
 
 def _daily_reminder_message(first_name: str) -> str:

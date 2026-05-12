@@ -85,6 +85,21 @@ export default function ProgressPage() {
   }, [loadEngagement, router]);
 
   async function enableReminder() {
+    if (remindersEnabled) {
+      try {
+        setStatus("Refreshing reminders");
+        const config = await loadNotificationConfig();
+        await saveReminderSubscription(config.publicKey);
+        setStatus("Sending test reminder");
+        await postAuthenticated("/api/notifications/test", {});
+        setStatus("Test reminder sent");
+      } catch (error) {
+        console.error(error);
+        setStatus(error instanceof Error ? error.message : "Test reminder failed");
+      }
+      return;
+    }
+
     if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
       setStatus("Push reminders unavailable on this browser");
       return;
@@ -98,40 +113,44 @@ export default function ProgressPage() {
 
     try {
       setStatus("Setting up reminders");
-      const configResponse = await fetch(`${ML_API_URL}/api/notifications/config`);
-      const config = (await configResponse.json()) as {
-        supported?: boolean;
-        publicKey?: string;
-      };
-
-      if (!config.supported || !config.publicKey) {
-        throw new Error("Push reminders are not configured yet");
-      }
-
-      const registration = await ensureServiceWorkerRegistration();
-      const existingSubscription = await registration.pushManager.getSubscription();
-      const subscription =
-        existingSubscription ||
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: base64UrlToUint8Array(config.publicKey),
-        }));
-
-      await postAuthenticated("/api/notifications/subscribe", {
-        subscription: subscription.toJSON(),
-        reminder_hour_utc: localHourToUtc(18),
-        user_agent: navigator.userAgent,
-      });
+      const config = await loadNotificationConfig();
+      await saveReminderSubscription(config.publicKey);
 
       window.localStorage.setItem("vivida_reminders", "enabled");
       setRemindersEnabled(true);
       setStatus("Reminders enabled");
-
-      await postAuthenticated("/api/notifications/test", {});
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "Reminder setup failed");
     }
+  }
+
+  async function loadNotificationConfig() {
+    const configResponse = await fetch(`${ML_API_URL}/api/notifications/config`);
+    const config = (await configResponse.json()) as {
+      supported?: boolean;
+      publicKey?: string;
+    };
+
+    if (!config.supported || !config.publicKey) {
+      throw new Error("Push reminders are not configured yet");
+    }
+
+    return { publicKey: config.publicKey };
+  }
+
+  async function saveReminderSubscription(publicKey: string) {
+    const registration = await ensureServiceWorkerRegistration();
+    const subscription = await getUsablePushSubscription(
+      registration,
+      publicKey,
+    );
+
+    await postAuthenticated("/api/notifications/subscribe", {
+      subscription: subscription.toJSON(),
+      reminder_hour_utc: localHourToUtc(18),
+      user_agent: navigator.userAgent,
+    });
   }
 
   async function disableReminder() {
@@ -237,6 +256,32 @@ async function ensureServiceWorkerRegistration() {
   return navigator.serviceWorker.register("/sw.js");
 }
 
+async function getUsablePushSubscription(
+  registration: ServiceWorkerRegistration,
+  publicKey: string,
+) {
+  const applicationServerKey = base64UrlToUint8Array(publicKey);
+  const existingSubscription = await registration.pushManager.getSubscription();
+
+  if (existingSubscription) {
+    const existingKey = existingSubscription.options.applicationServerKey;
+    if (
+      existingKey &&
+      bufferSourceToBase64Url(existingKey) ===
+        bufferSourceToBase64Url(applicationServerKey)
+    ) {
+      return existingSubscription;
+    }
+
+    await existingSubscription.unsubscribe();
+  }
+
+  return registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey,
+  });
+}
+
 function base64UrlToUint8Array(base64UrlData: string) {
   const padding = "=".repeat((4 - (base64UrlData.length % 4)) % 4);
   const base64 = (base64UrlData + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -248,6 +293,24 @@ function base64UrlToUint8Array(base64UrlData: string) {
   }
 
   return buffer;
+}
+
+function bufferSourceToBase64Url(buffer: BufferSource) {
+  const bytes =
+    buffer instanceof ArrayBuffer
+      ? new Uint8Array(buffer)
+      : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+
+  return window
+    .btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 function localHourToUtc(localHour: number) {

@@ -119,6 +119,7 @@ alter table public.push_subscriptions enable row level security;
 
 revoke all on table public.push_subscriptions from anon;
 revoke all on table public.push_subscriptions from authenticated;
+grant select, insert, update, delete on table public.push_subscriptions to authenticated;
 
 drop policy if exists "user_profile_select_own" on public.user_profile;
 create policy "user_profile_select_own"
