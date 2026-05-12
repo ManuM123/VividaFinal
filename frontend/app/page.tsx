@@ -45,7 +45,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const introTimer = window.setTimeout(() => setShowIntro(false), 4000);
+    const introTimer = window.setTimeout(() => setShowIntro(false), 1800);
 
     return () => window.clearTimeout(introTimer);
   }, []);
@@ -77,7 +77,7 @@ export default function HomePage() {
 
   return (
     <>
-      {showIntro && <IntroSplash />}
+      {showIntro && <IntroSplash onContinue={() => setShowIntro(false)} />}
       <div className={showIntro ? "home-page home-page--hidden" : "home-page"}>
         <AppShell title={pendingRedirect ? "Opening Vivida" : "Sign in"}>
           {pendingRedirect ? (
@@ -153,7 +153,7 @@ function SignInCard({
   );
 }
 
-function IntroSplash() {
+function IntroSplash({ onContinue }: { onContinue: () => void }) {
   return (
     <section aria-label="Welcome to Vivida" className="intro-splash">
       <div className="intro-splash__mark" aria-hidden="true">
@@ -162,6 +162,12 @@ function IntroSplash() {
       <div className="intro-splash__copy">
         <p>Welcome to Vivida</p>
         <h1>Your real-time support for stressful moments.</h1>
+        <Button
+          className="mt-6 h-12 rounded-lg bg-[var(--lavender)] px-6 font-black text-white"
+          onClick={onContinue}
+        >
+          Continue
+        </Button>
       </div>
     </section>
   );
