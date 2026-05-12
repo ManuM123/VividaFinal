@@ -86,23 +86,7 @@ export default function ProgressPage() {
 
   async function enableReminder() {
     if (remindersEnabled) {
-      const supportMessage = getPushSupportMessage();
-      if (supportMessage) {
-        setStatus(supportMessage);
-        return;
-      }
-
-      try {
-        setStatus("Refreshing reminders");
-        const config = await loadNotificationConfig();
-        await saveReminderSubscription(config.publicKey);
-        setStatus("Sending test reminder");
-        await postAuthenticated("/api/notifications/test", {});
-        setStatus("Test reminder sent");
-      } catch (error) {
-        console.error(error);
-        setStatus(error instanceof Error ? error.message : "Test reminder failed");
-      }
+      setStatus("Reminders already enabled");
       return;
     }
 
@@ -238,9 +222,10 @@ export default function ProgressPage() {
         </div>
         <Button
           className="h-12 rounded-lg bg-[var(--sage)] font-black text-white"
+          disabled={remindersEnabled}
           onClick={enableReminder}
         >
-          {remindersEnabled ? "Send test reminder" : "Enable reminders"}
+          {remindersEnabled ? "Reminders enabled" : "Enable reminders"}
         </Button>
         {remindersEnabled && (
           <Button
