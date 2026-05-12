@@ -142,7 +142,7 @@ function SupportNotice() {
         Extra support is available
       </h2>
       <p className="mt-2 text-sm leading-6">
-        If all of these statements feel not at all true right now, please do not
+        If all of these statements feel &quot;Not at all true&quot; right now, please do not
         hesitate to reach out for help. Vivida can support reflection, but it is
         not a substitute for mental health support.
       </p>

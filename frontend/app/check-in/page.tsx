@@ -67,6 +67,8 @@ export default function CheckInPage() {
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const guideAudioRef = useRef<HTMLAudioElement | null>(null);
+  const browserUtterancesRef = useRef<SpeechSynthesisUtterance[]>([]);
+  const isSpeakingGuideRef = useRef(false);
   const transcriptRef = useRef("");
 
   const loadEngagement = useCallback(async (activeUserId: string) => {
@@ -430,7 +432,16 @@ export default function CheckInPage() {
     if (!result?.guidance.voice_script) {
       return;
     }
-    guideAudioRef.current?.pause();
+    stopGuideAudio();
+    const script = result.guidance.voice_script;
+    const preferBrowserSpeech =
+      "speechSynthesis" in window &&
+      (navigator.maxTouchPoints > 0 || window.matchMedia("(display-mode: standalone)").matches);
+
+    if (preferBrowserSpeech && playBrowserGuide(script)) {
+      return;
+    }
+
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -449,6 +460,9 @@ export default function CheckInPage() {
       }
 
       const audioBlob = await response.blob();
+      if (!audioBlob.size || !audioBlob.type.includes("audio")) {
+        throw new Error("TTS response was not playable audio");
+      }
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       guideAudioRef.current = audio;
@@ -459,20 +473,84 @@ export default function CheckInPage() {
       return;
     } catch (error) {
       console.warn(error);
-      setStatus("Playing browser fallback");
+      if (playBrowserGuide(script)) {
+        return;
+      }
+      setStatus("Voice playback unavailable. Read the steps below.");
     }
+  }
 
-    playBrowserGuide(result.guidance.voice_script);
+  function stopGuideAudio() {
+    guideAudioRef.current?.pause();
+    guideAudioRef.current = null;
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+    isSpeakingGuideRef.current = false;
+    browserUtterancesRef.current = [];
+    window.speechSynthesis.cancel();
   }
 
   function playBrowserGuide(script: string) {
     if (!("speechSynthesis" in window)) {
-      return;
+      return false;
     }
-    const utterance = new SpeechSynthesisUtterance(script);
-    utterance.rate = 0.92;
-    utterance.pitch = 0.96;
-    window.speechSynthesis.speak(utterance);
+
+    const chunks = chunkSpeech(script);
+    if (!chunks.length) {
+      return false;
+    }
+
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    isSpeakingGuideRef.current = true;
+    setStatus("Playing browser guide");
+    vibrate(result?.guidance.haptics || [20, 40, 20]);
+
+    const voices = synth.getVoices();
+    const preferredVoice =
+      voices.find((voice) => voice.lang === "en-GB") ||
+      voices.find((voice) => voice.lang.startsWith("en")) ||
+      null;
+
+    let index = 0;
+    const utterances = chunks.map((chunk) => {
+      const utterance = new SpeechSynthesisUtterance(chunk);
+      utterance.rate = 0.92;
+      utterance.pitch = 0.96;
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      return utterance;
+    });
+    browserUtterancesRef.current = utterances;
+
+    const speakNext = () => {
+      if (!isSpeakingGuideRef.current) {
+        return;
+      }
+
+      const utterance = utterances[index];
+      if (!utterance) {
+        isSpeakingGuideRef.current = false;
+        setStatus("Guide complete");
+        return;
+      }
+
+      utterance.onend = () => {
+        index += 1;
+        speakNext();
+      };
+      utterance.onerror = () => {
+        isSpeakingGuideRef.current = false;
+        setStatus("Voice playback unavailable. Read the steps below.");
+      };
+      synth.speak(utterance);
+      window.setTimeout(() => synth.resume(), 0);
+    };
+
+    speakNext();
+    return true;
   }
 
   return (
@@ -915,6 +993,42 @@ function vibrate(pattern: number[]) {
   if ("vibrate" in navigator) {
     navigator.vibrate(pattern);
   }
+}
+
+function chunkSpeech(script: string) {
+  const sentences = script
+    .replace(/\s+/g, " ")
+    .trim()
+    .match(/[^.!?]+[.!?]*/g);
+  if (!sentences) {
+    return [];
+  }
+
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    const cleanSentence = sentence.trim();
+    if (!cleanSentence) {
+      continue;
+    }
+
+    const next = current ? `${current} ${cleanSentence}` : cleanSentence;
+    if (next.length <= 220) {
+      current = next;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+    current = cleanSentence;
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
 }
 
 async function convertToWav(blob: Blob) {
