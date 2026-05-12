@@ -127,8 +127,10 @@ export default function HomePage() {
     <>
       {showIntro && <IntroSplash />}
       <div className={showIntro ? "home-page home-page--hidden" : "home-page"}>
-        <AppShell title={pendingRedirect ? "Opening Vivida" : "Sign in"}>
-          {pendingRedirect ? (
+        <AppShell
+          title={!authChecked || pendingRedirect ? "Opening Vivida" : "Sign in"}
+        >
+          {!authChecked || pendingRedirect ? (
             <OpeningCard />
           ) : (
             <SignInCard

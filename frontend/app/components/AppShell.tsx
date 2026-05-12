@@ -14,7 +14,7 @@ export function AppShell({
   showNav?: boolean;
 }) {
   return (
-    <main className="app-bottom-space mx-auto flex min-h-dvh w-full max-w-[680px] flex-col px-4 pt-5">
+    <main className="app-bottom-space mx-auto flex min-h-screen w-full max-w-[680px] flex-col px-4 pt-5">
       <header className="mb-5 flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-black uppercase text-[var(--lavender)]">

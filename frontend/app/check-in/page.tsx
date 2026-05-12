@@ -67,6 +67,7 @@ export default function CheckInPage() {
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const guideAudioRef = useRef<HTMLAudioElement | null>(null);
+  const transcriptRef = useRef("");
 
   const loadEngagement = useCallback(async (activeUserId: string) => {
     const today = todayKey();
@@ -176,6 +177,8 @@ export default function CheckInPage() {
       });
       streamRef.current = stream;
       chunksRef.current = [];
+      transcriptRef.current = "";
+      setTranscript("");
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
@@ -208,6 +211,13 @@ export default function CheckInPage() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
 
     try {
+      if (!hasEnoughTranscript(transcriptRef.current)) {
+        chunksRef.current = [];
+        setStatus("I could not hear enough words. Please try again.");
+        setIsRecording(false);
+        return;
+      }
+
       const blob = new Blob(chunksRef.current, {
         type: mediaRecorderRef.current?.mimeType || "audio/webm",
       });
@@ -254,7 +264,7 @@ export default function CheckInPage() {
     form.append("audio", wavBlob, "vivida-checkin.wav");
     form.append("session_id", userId || "anonymous");
     form.append("first_name", firstName);
-    form.append("transcript", transcript.trim());
+    form.append("transcript", transcriptRef.current.trim());
     if (debugMetadata) {
       form.append("client_debug", JSON.stringify(debugMetadata));
     }
@@ -397,7 +407,7 @@ export default function CheckInPage() {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-GB";
-    let finalTranscript = transcript.trim();
+    let finalTranscript = transcriptRef.current.trim();
 
     recognition.onresult = (event) => {
       let interim = "";
@@ -409,7 +419,9 @@ export default function CheckInPage() {
           interim += text;
         }
       }
-      setTranscript(`${finalTranscript} ${interim}`.trim());
+      const nextTranscript = `${finalTranscript} ${interim}`.trim();
+      transcriptRef.current = nextTranscript;
+      setTranscript(nextTranscript);
     };
     recognition.start();
   }
@@ -587,6 +599,7 @@ export default function CheckInPage() {
             <Button
               className="flex h-12 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-5 font-black"
               onClick={() => {
+                transcriptRef.current = "";
                 setTranscript("");
                 setResult(null);
               }}
@@ -607,6 +620,10 @@ function ExerciseGuide({ result }: { result: AnalyseResponse }) {
   const selectedPhase = phases[activePhase];
 
   function selectPhase(index: number) {
+    if (index === activePhase) {
+      return;
+    }
+
     setActivePhase(index);
     vibrate(result.guidance.haptics || [20, 40, 20]);
   }
@@ -651,6 +668,8 @@ function ExerciseGuide({ result }: { result: AnalyseResponse }) {
                 }`}
                 key={phase.label}
                 type="button"
+                aria-pressed={index === activePhase}
+                onPointerDown={() => selectPhase(index)}
                 onClick={() => selectPhase(index)}
               >
                 {phase.label}
@@ -881,6 +900,15 @@ function ExerciseMotion({
       `}</style>
     </div>
   );
+}
+
+function hasEnoughTranscript(text: string) {
+  const words = text
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /[a-zA-Z]/.test(word));
+
+  return words.length >= 2;
 }
 
 function vibrate(pattern: number[]) {
