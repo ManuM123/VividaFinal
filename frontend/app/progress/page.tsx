@@ -86,6 +86,12 @@ export default function ProgressPage() {
 
   async function enableReminder() {
     if (remindersEnabled) {
+      const supportMessage = getPushSupportMessage();
+      if (supportMessage) {
+        setStatus(supportMessage);
+        return;
+      }
+
       try {
         setStatus("Refreshing reminders");
         const config = await loadNotificationConfig();
@@ -100,8 +106,9 @@ export default function ProgressPage() {
       return;
     }
 
-    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setStatus("Push reminders unavailable on this browser");
+    const supportMessage = getPushSupportMessage();
+    if (supportMessage) {
+      setStatus(supportMessage);
       return;
     }
 
@@ -246,6 +253,34 @@ export default function ProgressPage() {
       </section>
     </AppShell>
   );
+}
+
+function getPushSupportMessage() {
+  if (!window.isSecureContext) {
+    return "Open Vivida from the secure deployed site to enable reminders.";
+  }
+
+  if (!("Notification" in window)) {
+    return "Notifications are not supported on this browser.";
+  }
+
+  if (!("serviceWorker" in navigator)) {
+    return "Service workers are not available in this browser session.";
+  }
+
+  if (!("PushManager" in window)) {
+    if (isProbablyIos()) {
+      return "On iPhone, add Vivida to Home Screen and open it from there to enable reminders.";
+    }
+
+    return "Push reminders are not supported on this browser.";
+  }
+
+  return "";
+}
+
+function isProbablyIos() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
 async function ensureServiceWorkerRegistration() {

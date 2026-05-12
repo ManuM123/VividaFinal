@@ -14,7 +14,7 @@ export default function HomePage() {
   const [password, setPassword] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authMessage, setAuthMessage] = useState("");
-  const [showIntro, setShowIntro] = useState(true);
+  const [showIntro, setShowIntro] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRedirect, setPendingRedirect] = useState<string | null>(null);
@@ -26,23 +26,29 @@ export default function HomePage() {
       .then(async ({ data }) => {
         if (!data.user) {
           setAuthChecked(true);
+          setShowIntro(true);
           return;
         }
 
-        await openAppForUser(data.user.id);
+        await openAppForUser(data.user.id, { hardNavigate: true });
         setAuthChecked(true);
       })
       .catch(() => {
         setAuthChecked(true);
+        setShowIntro(true);
         setAuthMessage("Could not check your session. Try signing in again.");
       });
   }, []);
 
   useEffect(() => {
+    if (!showIntro) {
+      return;
+    }
+
     const introTimer = window.setTimeout(() => setShowIntro(false), 2800);
 
     return () => window.clearTimeout(introTimer);
-  }, []);
+  }, [showIntro]);
 
   useEffect(() => {
     if (!showIntro && pendingRedirect) {
@@ -50,7 +56,10 @@ export default function HomePage() {
     }
   }, [pendingRedirect, router, showIntro]);
 
-  async function openAppForUser(userId: string) {
+  async function openAppForUser(
+    userId: string,
+    options: { hardNavigate?: boolean } = {},
+  ) {
     const { data: assessment } = await supabase
       .from("gse_assessments")
       .select("score")
@@ -60,8 +69,15 @@ export default function HomePage() {
       .limit(1)
       .maybeSingle();
 
+    const nextPath = assessment ? "/check-in" : "/onboarding";
+
+    if (options.hardNavigate) {
+      window.location.replace(nextPath);
+      return;
+    }
+
     setShowIntro(false);
-    setPendingRedirect(assessment ? "/check-in" : "/onboarding");
+    setPendingRedirect(nextPath);
   }
 
   async function submitAuth() {
@@ -265,6 +281,8 @@ function IntroSplash() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register("/sw.js", { updateViaCache: "none" })
+      .catch(() => {});
   }
 }

@@ -117,7 +117,9 @@ export default function CheckInPage() {
 
   useEffect(() => {
     window.setTimeout(() => {
-      setHasVoiceConsent(window.localStorage.getItem(CONSENT_KEY) === "accepted");
+      setHasVoiceConsent(
+        window.localStorage.getItem(CONSENT_KEY) === "accepted",
+      );
       setIsMounted(true);
     }, 0);
   }, []);
@@ -455,9 +457,7 @@ export default function CheckInPage() {
     if (!("speechSynthesis" in window)) {
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(
-      script,
-    );
+    const utterance = new SpeechSynthesisUtterance(script);
     utterance.rate = 0.92;
     utterance.pitch = 0.96;
     window.speechSynthesis.speak(utterance);
@@ -478,9 +478,9 @@ export default function CheckInPage() {
                 Voice privacy
               </p>
               <p className="mt-2 text-sm leading-6">
-                Vivida only uses any recordings for emotion
-                analysis. The raw audio is deleted after processing; the app
-                does not store any sensitive data.
+                Vivida only uses any recordings for emotion analysis. The raw
+                audio is deleted after processing; the app does not store any
+                sensitive data.
               </p>
               <Button
                 className="mt-3 h-11 w-full rounded-lg bg-[var(--sage)] font-black text-white"
@@ -704,7 +704,10 @@ function ExerciseMotion({
             </span>
           </div>
           <div className="grid justify-items-center gap-1 text-[var(--lavender-dark)]">
-            <MoveRight className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]" aria-hidden="true" />
+            <MoveRight
+              className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]"
+              aria-hidden="true"
+            />
             <span className="h-2 w-2 rounded-full bg-[var(--lavender)] animate-[breathe_2.8s_ease-in-out_infinite]" />
           </div>
           <div className="grid justify-items-center gap-2">
@@ -757,7 +760,10 @@ function ExerciseMotion({
         <div className="grid w-full max-w-sm grid-cols-[1fr_auto_1fr] items-center gap-3">
           <div className="grid justify-items-center gap-2">
             <div className="relative grid h-16 w-16 place-items-center rounded-full border-2 border-[var(--amber)] bg-white text-[var(--amber)] shadow-sm">
-              <Sparkle className="h-7 w-7 animate-[glow_3s_ease-in-out_infinite]" aria-hidden="true" />
+              <Sparkle
+                className="h-7 w-7 animate-[glow_3s_ease-in-out_infinite]"
+                aria-hidden="true"
+              />
               <span className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-[var(--amber-soft)] animate-[breathe_3s_ease-in-out_infinite]" />
             </div>
             <span className="text-xs font-black uppercase text-[var(--muted-foreground)]">
@@ -765,7 +771,10 @@ function ExerciseMotion({
             </span>
           </div>
           <div className="grid justify-items-center gap-1 text-[var(--sky)]">
-            <MoveRight className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]" aria-hidden="true" />
+            <MoveRight
+              className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]"
+              aria-hidden="true"
+            />
             <span className="h-1 w-14 rounded-full bg-[var(--sky)]/45" />
           </div>
           <div className="grid justify-items-center gap-2">

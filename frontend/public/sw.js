@@ -1,15 +1,15 @@
-const CACHE_NAME = "vivida-next-v3";
-const APP_SHELL = [
-  "/",
-  "/check-in",
-  "/progress",
+const CACHE_NAME = "vivida-assets-v4";
+const STATIC_ASSETS = [
   "/manifest.webmanifest",
+  "/icon-192x192.png",
+  "/icon-512x512.png",
   "/icons/icon-192.svg",
   "/icons/icon-512.svg",
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  self.skipWaiting();
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));
 });
 
 self.addEventListener("activate", (event) => {
@@ -18,6 +18,7 @@ self.addEventListener("activate", (event) => {
       Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
     ),
   );
+  event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener("fetch", (event) => {
@@ -26,7 +27,19 @@ self.addEventListener("fetch", (event) => {
   }
 
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/") || url.hostname.includes("supabase")) {
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/_next/")
+  ) {
+    return;
+  }
+
+  if (event.request.mode === "navigate") {
+    return;
+  }
+
+  if (!STATIC_ASSETS.includes(url.pathname)) {
     return;
   }
 
@@ -34,7 +47,7 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((cached) => {
       const networkFetch = fetch(event.request)
         .then((response) => {
-          if (response.ok && url.origin === self.location.origin) {
+          if (response.ok) {
             const copy = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
           }
