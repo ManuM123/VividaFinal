@@ -14,6 +14,8 @@ import {
 } from "../static_data_and_types";
 
 const supabase = createClient();
+const ML_API_URL =
+  process.env.NEXT_PUBLIC_ML_API_URL || "http://127.0.0.1:8000";
 
 export default function ProgressPage() {
   const router = useRouter();
@@ -83,8 +85,8 @@ export default function ProgressPage() {
   }, [loadEngagement, router]);
 
   async function enableReminder() {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-      setStatus("Notifications unavailable");
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setStatus("Push reminders unavailable on this browser");
       return;
     }
 
@@ -94,15 +96,91 @@ export default function ProgressPage() {
       return;
     }
 
-    const registration = await navigator.serviceWorker.ready;
-    registration.active?.postMessage({
-      type: "vivida-reminder",
-      title: "Vivida is ready",
-      body: "A gentle reminder can bring you back before stress builds up.",
+    try {
+      setStatus("Setting up reminders");
+      const configResponse = await fetch(`${ML_API_URL}/api/notifications/config`);
+      const config = (await configResponse.json()) as {
+        supported?: boolean;
+        publicKey?: string;
+      };
+
+      if (!config.supported || !config.publicKey) {
+        throw new Error("Push reminders are not configured yet");
+      }
+
+      const registration = await ensureServiceWorkerRegistration();
+      const existingSubscription = await registration.pushManager.getSubscription();
+      const subscription =
+        existingSubscription ||
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToUint8Array(config.publicKey),
+        }));
+
+      await postAuthenticated("/api/notifications/subscribe", {
+        subscription: subscription.toJSON(),
+        reminder_hour_utc: localHourToUtc(18),
+        user_agent: navigator.userAgent,
+      });
+
+      window.localStorage.setItem("vivida_reminders", "enabled");
+      setRemindersEnabled(true);
+      setStatus("Reminders enabled");
+
+      await postAuthenticated("/api/notifications/test", {});
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Reminder setup failed");
+    }
+  }
+
+  async function disableReminder() {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await postAuthenticated("/api/notifications/unsubscribe", {
+          endpoint: subscription.endpoint,
+        });
+        await subscription.unsubscribe();
+      }
+      window.localStorage.removeItem("vivida_reminders");
+      setRemindersEnabled(false);
+      setStatus("Reminders disabled");
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not disable reminders");
+    }
+  }
+
+  async function postAuthenticated(path: string, body: object) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      throw new Error("Please sign in again before enabling reminders");
+    }
+
+    const response = await fetch(`${ML_API_URL}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     });
-    window.localStorage.setItem("vivida_reminders", "enabled");
-    setRemindersEnabled(true);
-    setStatus("Reminders enabled");
+
+    if (!response.ok) {
+      let message = "Reminder request failed";
+      try {
+        const errorBody = (await response.json()) as { detail?: string };
+        message = errorBody.detail || message;
+      } catch {
+        message = `${message} (${response.status})`;
+      }
+      throw new Error(message);
+    }
+
+    return response.json();
   }
 
   return (
@@ -138,7 +216,42 @@ export default function ProgressPage() {
         >
           {remindersEnabled ? "Send test reminder" : "Enable reminders"}
         </Button>
+        {remindersEnabled && (
+          <Button
+            className="h-12 rounded-lg border border-[var(--line)] bg-white font-black"
+            onClick={disableReminder}
+          >
+            Disable reminders
+          </Button>
+        )}
       </section>
     </AppShell>
   );
+}
+
+async function ensureServiceWorkerRegistration() {
+  const existing = await navigator.serviceWorker.getRegistration();
+  if (existing) {
+    return existing;
+  }
+  return navigator.serviceWorker.register("/sw.js");
+}
+
+function base64UrlToUint8Array(base64UrlData: string) {
+  const padding = "=".repeat((4 - (base64UrlData.length % 4)) % 4);
+  const base64 = (base64UrlData + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const buffer = new Uint8Array(rawData.length);
+
+  for (let index = 0; index < rawData.length; index += 1) {
+    buffer[index] = rawData.charCodeAt(index);
+  }
+
+  return buffer;
+}
+
+function localHourToUtc(localHour: number) {
+  const date = new Date();
+  date.setHours(localHour, 0, 0, 0);
+  return date.getUTCHours();
 }

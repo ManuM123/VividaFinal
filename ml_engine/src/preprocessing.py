@@ -67,7 +67,7 @@ class AudioPreprocessor:
         # end to end function that preprocesses .wav file and converts it into spectogram
        
         # 1. Load the audio file
-        audio, _ = librosa.load(file_path, sr=self.sample_rate)
+        audio, _ = self.load_audio(file_path)
 
         # 2. Clean the noise
         audio = self.apply_band_pass_filter(audio)
@@ -79,3 +79,6 @@ class AudioPreprocessor:
         audio = self.peak_normalisation(audio)
 
         return self.extract_hybrid_features(audio)
+
+    def load_audio(self, file_path):
+        return librosa.load(file_path, sr=self.sample_rate)

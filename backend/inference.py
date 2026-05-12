@@ -88,6 +88,48 @@ class VividaInferenceEngine:
             "model_available": self.model is not None,
         }
 
+    def debug_audio(
+        self,
+        audio_path: Path,
+        output_dir: Path | None = None,
+        analysis_id: str | None = None,
+    ) -> dict:
+        raw_audio, raw_sr = self.preprocessor.load_audio(str(audio_path))
+        filtered_audio = self.preprocessor.apply_band_pass_filter(raw_audio)
+        standardised_audio = self.preprocessor.standardise_audio_length(filtered_audio)
+        normalised_audio = self.preprocessor.peak_normalisation(standardised_audio)
+        features = self.preprocessor.extract_hybrid_features(normalised_audio).astype(np.float32)
+        normalised_features = self._normalise_feature_blocks(features[np.newaxis, ...].copy())
+        if "mlp" not in str(self.model_path).lower():
+            model_input = normalised_features[..., np.newaxis]
+        else:
+            model_input = normalised_features
+
+        debug_outputs = {}
+        if output_dir and analysis_id:
+            debug_outputs = self._write_debug_feature_files(
+                output_dir=output_dir,
+                analysis_id=analysis_id,
+                features=features,
+                model_input=model_input,
+            )
+
+        return {
+            "input_file": str(audio_path),
+            "raw_audio": self._audio_stats(raw_audio, raw_sr),
+            "filtered_audio": self._audio_stats(filtered_audio, self.preprocessor.sample_rate),
+            "standardised_audio": self._audio_stats(standardised_audio, self.preprocessor.sample_rate),
+            "normalised_audio": self._audio_stats(normalised_audio, self.preprocessor.sample_rate),
+            "features": self._array_stats(features),
+            "log_mel_spectrogram": self._array_stats(features[:128, :]),
+            "mfccs": self._array_stats(features[128:168, :]),
+            "chroma": self._array_stats(features[168:, :]),
+            "normalised_features": self._array_stats(normalised_features),
+            "model_input": self._array_stats(model_input),
+            "acoustic_profile": self._build_acoustic_profile(audio_path),
+            "debug_outputs": debug_outputs,
+        }
+
     def _resolve_model_path(self, explicit_path: str | None) -> Path | None:
         requested_path = explicit_path or os.getenv("VIVIDA_MODEL_PATH")
         if requested_path:
@@ -156,3 +198,101 @@ class VividaInferenceEngine:
         x_arr[:, :128, :] = mel
         x_arr[:, 128:, :] = engineered
         return x_arr
+
+    def _build_acoustic_profile(self, audio_path: Path) -> dict:
+        audio, sample_rate = self.preprocessor.load_audio(str(audio_path))
+        filtered_audio = self.preprocessor.apply_band_pass_filter(audio)
+        frame_rms = self._frame_rms(audio, sample_rate)
+        speech_threshold = max(0.015, float(np.mean(frame_rms)) * 0.55)
+        active_ratio = float(np.mean(frame_rms > speech_threshold)) if frame_rms.size else 0.0
+
+        return {
+            "sample_rate": int(sample_rate),
+            "duration_seconds": round(float(audio.shape[0] / sample_rate), 4),
+            "raw_rms": round(self._rms(audio), 6),
+            "filtered_rms": round(self._rms(filtered_audio), 6),
+            "peak_abs": round(float(np.max(np.abs(audio))), 6),
+            "active_ratio": round(active_ratio, 6),
+        }
+
+    def _frame_rms(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
+        frame_length = max(1, int(sample_rate * 0.05))
+        hop_length = max(1, int(sample_rate * 0.025))
+        if audio.shape[0] < frame_length:
+            return np.array([self._rms(audio)], dtype=np.float32)
+
+        values = []
+        for start in range(0, audio.shape[0] - frame_length + 1, hop_length):
+            frame = audio[start : start + frame_length]
+            values.append(self._rms(frame))
+        return np.array(values, dtype=np.float32)
+
+    def _audio_stats(self, audio: np.ndarray, sample_rate: int) -> dict:
+        return {
+            "sample_rate": int(sample_rate),
+            "samples": int(audio.shape[0]),
+            "duration_seconds": round(float(audio.shape[0] / sample_rate), 4),
+            "min": round(float(np.min(audio)), 6),
+            "max": round(float(np.max(audio)), 6),
+            "mean": round(float(np.mean(audio)), 6),
+            "rms": round(float(np.sqrt(np.mean(np.square(audio)))), 6),
+            "peak_abs": round(float(np.max(np.abs(audio))), 6),
+        }
+
+    def _array_stats(self, values: np.ndarray) -> dict:
+        return {
+            "shape": [int(dim) for dim in values.shape],
+            "min": round(float(np.min(values)), 6),
+            "max": round(float(np.max(values)), 6),
+            "mean": round(float(np.mean(values)), 6),
+            "std": round(float(np.std(values)), 6),
+        }
+
+    def _rms(self, audio: np.ndarray) -> float:
+        return float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+
+    def _write_debug_feature_files(
+        self,
+        output_dir: Path,
+        analysis_id: str,
+        features: np.ndarray,
+        model_input: np.ndarray,
+    ) -> dict:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        log_mel = features[:128, :]
+        log_mel_png = output_dir / f"{analysis_id}_log_mel_spectrogram.png"
+        hybrid_features_path = output_dir / f"{analysis_id}_hybrid_features.npy"
+        model_input_path = output_dir / f"{analysis_id}_model_input.npy"
+
+        np.save(hybrid_features_path, features)
+        np.save(model_input_path, model_input)
+        self._write_spectrogram_image(log_mel, log_mel_png)
+
+        return {
+            "log_mel_spectrogram_png": str(log_mel_png),
+            "hybrid_features_npy": str(hybrid_features_path),
+            "model_input_npy": str(model_input_path),
+        }
+
+    def _write_spectrogram_image(self, spectrogram: np.ndarray, output_path: Path) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(8, 4), dpi=150)
+        image = ax.imshow(
+            spectrogram,
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            cmap="magma",
+        )
+        ax.set_title("Log-mel spectrogram")
+        ax.set_xlabel("Time frames")
+        ax.set_ylabel("Mel bands")
+        fig.colorbar(image, ax=ax, label="dB")
+        fig.tight_layout()
+        fig.savefig(output_path)
+        plt.close(fig)

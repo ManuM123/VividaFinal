@@ -168,7 +168,7 @@ function IntroSplash() {
 }
 
 function registerServiceWorker() {
-  if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
+  if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
 }

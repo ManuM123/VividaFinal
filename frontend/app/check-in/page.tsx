@@ -4,10 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AudioLines,
+  Armchair,
   HeartPulse,
+  MoveRight,
   Play,
   RotateCcw,
+  Sparkle,
   Sparkles,
+  Target,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
@@ -52,11 +56,8 @@ export default function CheckInPage() {
     number | null
   >(null);
   const [feedbackSaved, setFeedbackSaved] = useState(false);
-  const [hasVoiceConsent, setHasVoiceConsent] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.localStorage.getItem(CONSENT_KEY) === "accepted",
-  );
+  const [hasVoiceConsent, setHasVoiceConsent] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const [engagement, setEngagement] =
     useState<EngagementSummary>(EMPTY_ENGAGEMENT);
   const [streakDates, setStreakDates] = useState<string[]>([]);
@@ -65,6 +66,7 @@ export default function CheckInPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const guideAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const loadEngagement = useCallback(async (activeUserId: string) => {
     const today = todayKey();
@@ -114,6 +116,13 @@ export default function CheckInPage() {
   }, []);
 
   useEffect(() => {
+    window.setTimeout(() => {
+      setHasVoiceConsent(window.localStorage.getItem(CONSENT_KEY) === "accepted");
+      setIsMounted(true);
+    }, 0);
+  }, []);
+
+  useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) {
         router.replace("/");
@@ -155,7 +164,14 @@ export default function CheckInPage() {
 
     try {
       vibrate([20, 30, 20]);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: false,
+          echoCancellation: false,
+          noiseSuppression: false,
+          channelCount: 1,
+        },
+      });
       streamRef.current = stream;
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream);
@@ -194,33 +210,52 @@ export default function CheckInPage() {
         type: mediaRecorderRef.current?.mimeType || "audio/webm",
       });
       const wavBlob = await convertToWav(blob);
-      const data = await analyseRecording(wavBlob);
-      const checkInId = await saveCheckIn(data);
-      if (!checkInId) {
-        throw new Error("Could not save check-in metadata");
-      }
-      await recordDailyActivity("checkin");
-      setSavedCheckInId(checkInId);
-      setFeedbackScore(null);
-      setFeedbackSaved(false);
+      const data = await analyseRecording(wavBlob, {
+        sourceSize: blob.size,
+        sourceType: blob.type,
+        wavSize: wavBlob.size,
+        recorderMimeType: mediaRecorderRef.current?.mimeType || "",
+      });
       setResult(data);
       vibrate(data.guidance.haptics || [25, 35, 25]);
       setStatus("Guidance ready");
-      if (userId) {
-        await loadEngagement(userId);
+
+      try {
+        const checkInId = await saveCheckIn(data);
+        await recordDailyActivity("checkin");
+        setSavedCheckInId(checkInId);
+        if (userId) {
+          await loadEngagement(userId);
+        }
+      } catch (saveError) {
+        console.error(saveError);
+        setStatus(
+          saveError instanceof Error
+            ? `Guidance ready - not saved: ${saveError.message}`
+            : "Guidance ready - not saved",
+        );
       }
+
+      setFeedbackScore(null);
+      setFeedbackSaved(false);
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "Analysis failed");
     }
   }
 
-  async function analyseRecording(wavBlob: Blob) {
+  async function analyseRecording(
+    wavBlob: Blob,
+    debugMetadata?: Record<string, string | number>,
+  ) {
     const form = new FormData();
     form.append("audio", wavBlob, "vivida-checkin.wav");
     form.append("session_id", userId || "anonymous");
     form.append("first_name", firstName);
     form.append("transcript", transcript.trim());
+    if (debugMetadata) {
+      form.append("client_debug", JSON.stringify(debugMetadata));
+    }
 
     const response = await fetch(`${ML_API_URL}/api/analyse`, {
       method: "POST",
@@ -264,11 +299,14 @@ export default function CheckInPage() {
       .single();
 
     if (error) {
-      setStatus(error.message);
-      return null;
+      throw new Error(error.message);
     }
 
-    return (row?.id as string | undefined) || null;
+    if (!row?.id) {
+      throw new Error("Check-in saved without returning an id");
+    }
+
+    return row.id as string;
   }
 
   async function saveFeedback(scoreValue: number) {
@@ -374,14 +412,51 @@ export default function CheckInPage() {
     recognition.start();
   }
 
-  function playGuide() {
-    if (!result?.guidance.voice_script || !("speechSynthesis" in window)) {
+  async function playGuide() {
+    if (!result?.guidance.voice_script) {
       return;
     }
-    window.speechSynthesis.cancel();
+    guideAudioRef.current?.pause();
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     vibrate(result.guidance.haptics || [20, 40, 20]);
+
+    try {
+      setStatus("Creating voice guide");
+      const response = await fetch(`${ML_API_URL}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: result.guidance.voice_script }),
+      });
+
+      if (!response.ok) {
+        throw new Error("TTS unavailable");
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      guideAudioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      audio.onerror = () => URL.revokeObjectURL(audioUrl);
+      await audio.play();
+      setStatus("Playing guide");
+      return;
+    } catch (error) {
+      console.warn(error);
+      setStatus("Playing browser fallback");
+    }
+
+    playBrowserGuide(result.guidance.voice_script);
+  }
+
+  function playBrowserGuide(script: string) {
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
     const utterance = new SpeechSynthesisUtterance(
-      result.guidance.voice_script,
+      script,
     );
     utterance.rate = 0.92;
     utterance.pitch = 0.96;
@@ -397,7 +472,7 @@ export default function CheckInPage() {
       {!result && (
         <section className="grid gap-4 rounded-lg border border-[var(--line)] bg-white p-4 shadow-xl shadow-purple-950/5">
           <LotusProgress engagement={engagement} />
-          {!hasVoiceConsent && (
+          {isMounted && !hasVoiceConsent && (
             <div className="rounded-lg border border-[var(--line)] bg-[var(--sage-soft)] p-4">
               <p className="text-xs font-black uppercase text-[var(--sage)]">
                 Voice privacy
@@ -405,7 +480,7 @@ export default function CheckInPage() {
               <p className="mt-2 text-sm leading-6">
                 Vivida only uses any recordings for emotion
                 analysis. The raw audio is deleted after processing; the app
-                does not store any sensitive data
+                does not store any sensitive data.
               </p>
               <Button
                 className="mt-3 h-11 w-full rounded-lg bg-[var(--sage)] font-black text-white"
@@ -432,7 +507,7 @@ export default function CheckInPage() {
             className={`flex h-14 items-center justify-center gap-3 rounded-lg font-black text-white ${
               isRecording ? "bg-[var(--foreground)]" : "bg-[var(--lotus)]"
             }`}
-            disabled={!hasVoiceConsent}
+            disabled={!isMounted || !hasVoiceConsent}
             onClick={isRecording ? stopRecording : startRecording}
           >
             <AudioLines className="h-5 w-5" aria-hidden="true" />
@@ -616,6 +691,138 @@ function ExerciseMotion({
   animation?: AnalyseResponse["guidance"]["animation"];
   stateKey: string;
 }) {
+  if (animation === "two_chairs_dialogue") {
+    return (
+      <div className="mt-4 grid h-44 place-items-center rounded-lg bg-[linear-gradient(160deg,var(--lotus-soft),#f7fbf5)] px-4">
+        <div className="grid w-full max-w-sm grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="grid justify-items-center gap-2">
+            <div className="grid h-16 w-16 place-items-center rounded-full border-2 border-[var(--lotus)] bg-white text-[var(--lotus)] shadow-sm animate-[chairPulse_4s_ease-in-out_infinite]">
+              <Armchair className="h-8 w-8" aria-hidden="true" />
+            </div>
+            <span className="text-xs font-black uppercase text-[var(--muted-foreground)]">
+              Alarm
+            </span>
+          </div>
+          <div className="grid justify-items-center gap-1 text-[var(--lavender-dark)]">
+            <MoveRight className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]" aria-hidden="true" />
+            <span className="h-2 w-2 rounded-full bg-[var(--lavender)] animate-[breathe_2.8s_ease-in-out_infinite]" />
+          </div>
+          <div className="grid justify-items-center gap-2">
+            <div className="grid h-16 w-16 place-items-center rounded-full border-2 border-[var(--sage)] bg-white text-[var(--sage)] shadow-sm animate-[chairPulse_4s_ease-in-out_1.4s_infinite]">
+              <Armchair className="h-8 w-8" aria-hidden="true" />
+            </div>
+            <span className="text-xs font-black uppercase text-[var(--muted-foreground)]">
+              Compassion
+            </span>
+          </div>
+        </div>
+        <style jsx>{`
+          @keyframes chairPulse {
+            0%,
+            100% {
+              transform: translateY(0) scale(1);
+            }
+            50% {
+              transform: translateY(-3px) scale(1.04);
+            }
+          }
+          @keyframes bridge {
+            0%,
+            100% {
+              opacity: 0.45;
+              transform: translateX(-3px);
+            }
+            50% {
+              opacity: 1;
+              transform: translateX(3px);
+            }
+          }
+          @keyframes breathe {
+            0%,
+            100% {
+              transform: scale(0.8);
+            }
+            50% {
+              transform: scale(1.2);
+            }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (animation === "kindness_to_action") {
+    return (
+      <div className="mt-4 grid h-44 place-items-center rounded-lg bg-[linear-gradient(160deg,var(--sky-soft),#f7fbf5)] px-4">
+        <div className="grid w-full max-w-sm grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="grid justify-items-center gap-2">
+            <div className="relative grid h-16 w-16 place-items-center rounded-full border-2 border-[var(--amber)] bg-white text-[var(--amber)] shadow-sm">
+              <Sparkle className="h-7 w-7 animate-[glow_3s_ease-in-out_infinite]" aria-hidden="true" />
+              <span className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-[var(--amber-soft)] animate-[breathe_3s_ease-in-out_infinite]" />
+            </div>
+            <span className="text-xs font-black uppercase text-[var(--muted-foreground)]">
+              Support
+            </span>
+          </div>
+          <div className="grid justify-items-center gap-1 text-[var(--sky)]">
+            <MoveRight className="h-6 w-6 animate-[bridge_2.8s_ease-in-out_infinite]" aria-hidden="true" />
+            <span className="h-1 w-14 rounded-full bg-[var(--sky)]/45" />
+          </div>
+          <div className="grid justify-items-center gap-2">
+            <div className="grid h-16 w-16 place-items-center rounded-full border-2 border-[var(--sky)] bg-white text-[var(--sky)] shadow-sm animate-[targetPulse_3.2s_ease-in-out_infinite]">
+              <Target className="h-8 w-8" aria-hidden="true" />
+            </div>
+            <span className="text-xs font-black uppercase text-[var(--muted-foreground)]">
+              Action
+            </span>
+          </div>
+        </div>
+        <style jsx>{`
+          @keyframes glow {
+            0%,
+            100% {
+              opacity: 0.65;
+              transform: rotate(0deg) scale(0.96);
+            }
+            50% {
+              opacity: 1;
+              transform: rotate(8deg) scale(1.08);
+            }
+          }
+          @keyframes bridge {
+            0%,
+            100% {
+              opacity: 0.45;
+              transform: translateX(-3px);
+            }
+            50% {
+              opacity: 1;
+              transform: translateX(3px);
+            }
+          }
+          @keyframes targetPulse {
+            0%,
+            100% {
+              transform: scale(1);
+            }
+            50% {
+              transform: scale(1.06);
+            }
+          }
+          @keyframes breathe {
+            0%,
+            100% {
+              transform: scale(0.8);
+            }
+            50% {
+              transform: scale(1.25);
+            }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   const variant =
     animation === "steady_orbit" || animation === "two_voice_shift"
       ? "animate-[orbit_7s_linear_infinite] border-[var(--sky)]"

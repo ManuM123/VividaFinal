@@ -6,6 +6,10 @@
 **/.next
 **/node_modules
 **/.DS_Store
+.env
+.env.*
+frontend/.env
+frontend/.env.*
 ml_engine/Vivida.ipynb
 ml_engine/data/raw_ravdess_audio_files
 ml_engine/data/augmented_audio_files

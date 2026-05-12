@@ -66,6 +66,29 @@ create table if not exists public.daily_activity (
   unique (user_id, activity_date)
 );
 
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  endpoint text not null,
+  p256dh text not null,
+  auth text not null,
+  subscription jsonb not null,
+  user_agent text not null default '',
+  enabled boolean not null default true,
+  daily_reminders_enabled boolean not null default true,
+  reminder_hour_utc integer not null default 18 check (reminder_hour_utc between 0 and 23),
+  last_sent_date date,
+  motivation_enabled boolean not null default true,
+  motivation_hour_utc integer not null default 12 check (motivation_hour_utc between 0 and 23),
+  last_motivation_sent_date date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, endpoint)
+);
+
+comment on table public.push_subscriptions is
+  'Stores user-consented Web Push subscriptions for Vivida reminders. No transcript or audio data is stored here.';
+
 create index if not exists gse_assessments_user_created_idx
   on public.gse_assessments(user_id, created_at desc);
 
@@ -78,11 +101,24 @@ create index if not exists exercise_feedback_user_created_idx
 create index if not exists daily_activity_user_date_idx
   on public.daily_activity(user_id, activity_date desc);
 
+create index if not exists push_subscriptions_user_enabled_idx
+  on public.push_subscriptions(user_id, enabled);
+
+create index if not exists push_subscriptions_reminder_idx
+  on public.push_subscriptions(enabled, daily_reminders_enabled, reminder_hour_utc, last_sent_date);
+
+create index if not exists push_subscriptions_motivation_idx
+  on public.push_subscriptions(enabled, motivation_enabled, motivation_hour_utc, last_motivation_sent_date);
+
 alter table public.user_profile enable row level security;
 alter table public.gse_assessments enable row level security;
 alter table public.check_ins enable row level security;
 alter table public.exercise_feedback enable row level security;
 alter table public.daily_activity enable row level security;
+alter table public.push_subscriptions enable row level security;
+
+revoke all on table public.push_subscriptions from anon;
+revoke all on table public.push_subscriptions from authenticated;
 
 drop policy if exists "user_profile_select_own" on public.user_profile;
 create policy "user_profile_select_own"
@@ -145,3 +181,24 @@ create policy "daily_activity_update_own"
   on public.daily_activity for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+drop policy if exists "push_subscriptions_select_own" on public.push_subscriptions;
+create policy "push_subscriptions_select_own"
+  on public.push_subscriptions for select
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "push_subscriptions_insert_own" on public.push_subscriptions;
+create policy "push_subscriptions_insert_own"
+  on public.push_subscriptions for insert
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "push_subscriptions_update_own" on public.push_subscriptions;
+create policy "push_subscriptions_update_own"
+  on public.push_subscriptions for update
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "push_subscriptions_delete_own" on public.push_subscriptions;
+create policy "push_subscriptions_delete_own"
+  on public.push_subscriptions for delete
+  using ((select auth.uid()) = user_id);

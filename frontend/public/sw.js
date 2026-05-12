@@ -1,4 +1,4 @@
-const CACHE_NAME = "vivida-next-v2";
+const CACHE_NAME = "vivida-next-v3";
 const APP_SHELL = [
   "/",
   "/check-in",
@@ -75,8 +75,60 @@ self.addEventListener("message", (event) => {
   );
 });
 
+self.addEventListener("push", (event) => {
+  let data = {
+    title: "Vivida",
+    message: "A gentle check-in is ready when you are.",
+    url: "/check-in",
+    interaction: false,
+    tag: "vivida-reminder",
+  };
+
+  if (event.data) {
+    try {
+      data = { ...data, ...event.data.json() };
+    } catch {
+      data.message = event.data.text();
+    }
+  }
+
+  const options = {
+    body: data.message,
+    icon: "/icon-192x192.png",
+    badge: "/icon-192x192.png",
+    vibrate: [80, 40, 80],
+    tag: data.tag,
+    requireInteraction: Boolean(data.interaction),
+    data: {
+      url: data.url || "/check-in",
+      dateOfArrival: Date.now(),
+    },
+    actions: [
+      {
+        action: "open",
+        title: "Check in",
+      },
+      {
+        action: "close",
+        title: "Close",
+      },
+    ],
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Vivida", options).then(() => {
+      if ("setAppBadge" in navigator) {
+        return navigator.setAppBadge(1).catch(() => {});
+      }
+    }),
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  if ("clearAppBadge" in navigator) {
+    event.waitUntil(navigator.clearAppBadge().catch(() => {}));
+  }
   if (event.action === "close") {
     return;
   }

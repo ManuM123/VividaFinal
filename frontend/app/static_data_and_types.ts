@@ -47,9 +47,11 @@ export type AnalyseResponse = {
     voice_script: string;
     animation?:
       | "expanding_lotus"
+      | "kindness_to_action"
       | "steady_orbit"
       | "safe_base"
       | "softening_sentence"
+      | "two_chairs_dialogue"
       | "two_voice_shift"
       | "heart_safe_place";
     haptics?: number[];
@@ -57,6 +59,8 @@ export type AnalyseResponse = {
     reflection_prompt?: string;
     breath_pattern?: string;
     duration_seconds?: number;
+    personalisation_source?: "static" | "static_fallback" | "gemini";
+    personalisation_error?: string;
   };
 };
 
