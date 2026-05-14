@@ -434,14 +434,6 @@ export default function CheckInPage() {
     }
     stopGuideAudio();
     const script = result.guidance.voice_script;
-    const preferBrowserSpeech =
-      "speechSynthesis" in window &&
-      (navigator.maxTouchPoints > 0 || window.matchMedia("(display-mode: standalone)").matches);
-
-    if (preferBrowserSpeech && playBrowserGuide(script)) {
-      return;
-    }
-
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -463,13 +455,14 @@ export default function CheckInPage() {
       if (!audioBlob.size || !audioBlob.type.includes("audio")) {
         throw new Error("TTS response was not playable audio");
       }
+      const provider = response.headers.get("X-Vivida-TTS-Provider");
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       guideAudioRef.current = audio;
       audio.onended = () => URL.revokeObjectURL(audioUrl);
       audio.onerror = () => URL.revokeObjectURL(audioUrl);
       await audio.play();
-      setStatus("Playing guide");
+      setStatus(provider === "elevenlabs" ? "Playing ElevenLabs guide" : "Playing guide");
       return;
     } catch (error) {
       console.warn(error);

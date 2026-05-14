@@ -288,7 +288,11 @@ async def _synthesize_elevenlabs_audio(script: str) -> SynthesizedAudio:
     if not api_key:
         raise ValueError("ELEVENLABS_API_KEY is not set")
 
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", ELEVENLABS_TTS_VOICE_ID)
+    voice_id = (
+        os.getenv("ELEVENLABS_VOICE_ID")
+        or os.getenv("ELEVENLABS_TTS_VOICE_ID")
+        or ELEVENLABS_TTS_VOICE_ID
+    )
     model = os.getenv("ELEVENLABS_TTS_MODEL", ELEVENLABS_TTS_MODEL)
     output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", ELEVENLABS_OUTPUT_FORMAT)
     payload = {

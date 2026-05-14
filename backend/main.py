@@ -202,9 +202,16 @@ async def tts(request: Request, payload: TTSRequest) -> Response:
     try:
         audio_result = await synthesize_guidance_audio(payload.text)
     except Exception as exc:
+        detail = f"TTS unavailable: {exc.__class__.__name__}"
+        response = getattr(exc, "response", None)
+        if response is not None:
+            detail = f"{detail}: {response.status_code} {response.text[:500]}"
+        else:
+            detail = f"{detail}: {str(exc)[:500]}"
+        print(f"Vivida TTS error: {detail}")
         raise HTTPException(
             status_code=503,
-            detail=f"TTS unavailable: {exc.__class__.__name__}",
+            detail=detail,
         ) from exc
 
     if isinstance(audio_result, SynthesizedAudio):

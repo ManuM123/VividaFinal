@@ -40,6 +40,9 @@ ml_engine/results/
 !ml_engine/results/
 ml_engine/results/*
 !ml_engine/results/cnn_lstm_best.keras
+!ml_engine/results/wav2vec2_best/
+!ml_engine/results/wav2vec2_best/*
+ml_engine/results/wav2vec2_best/model.safetensors
 
 # Local notes
 docs/DEPLOYMENT.md

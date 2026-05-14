@@ -6,7 +6,10 @@ os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib")
 os.environ.setdefault("NUMBA_CACHE_DIR", "/private/tmp/numba")
 
 import keras
+import librosa
 import numpy as np
+import torch
+from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 
 from ml_engine.src.preprocessing import AudioPreprocessor
 
@@ -60,18 +63,24 @@ class VividaInferenceEngine:
     def __init__(self, model_path: str | None = None):
         self.preprocessor = AudioPreprocessor()
         self.model_path = self._resolve_model_path(model_path)
+        self.feature_extractor = None
+        self.device = self._resolve_torch_device()
         self.model = self._load_model(self.model_path)
 
     def predict(self, audio_path: Path) -> dict:
         if self.model is None:
             raise ModelUnavailableError(
                 "Vivida SER model is not available. Train and save "
-                "ml_engine/results/cnn_lstm_best.keras, or set VIVIDA_MODEL_PATH."
+                "ml_engine/results/wav2vec2_best, ml_engine/results/cnn_lstm_best.keras, "
+                "or set VIVIDA_MODEL_PATH."
             )
 
         start = time.perf_counter()
-        features = self.preprocessor.process_file(str(audio_path)).astype(np.float32)
-        model_result = self._predict_with_model(features)
+        if self._is_wav2vec2_model():
+            model_result = self._predict_with_wav2vec2(audio_path)
+        else:
+            features = self.preprocessor.process_file(str(audio_path)).astype(np.float32)
+            model_result = self._predict_with_model(features)
 
         emotion = model_result["emotion"]
         state_key = EMOTION_TO_STATE.get(emotion, "soothing")
@@ -137,6 +146,7 @@ class VividaInferenceEngine:
             return path if path.exists() else None
 
         candidates = [
+            Path("ml_engine/results/wav2vec2_best"),
             Path("ml_engine/results/cnn_lstm_best.keras"),
             Path("ml_engine/results/mlp_best.keras"),
         ]
@@ -148,11 +158,65 @@ class VividaInferenceEngine:
     def _load_model(self, model_path: Path | None):
         if model_path is None:
             return None
+        if self._looks_like_wav2vec2_path(model_path):
+            try:
+                self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_path)
+                model = AutoModelForAudioClassification.from_pretrained(model_path)
+                model.to(self.device)
+                model.eval()
+                return model
+            except Exception as exc:
+                print(f"Vivida warning: could not load Wav2Vec2 model {model_path}: {exc}")
+                self.feature_extractor = None
+                return None
         try:
             return keras.models.load_model(model_path, safe_mode=False)
         except Exception as exc:
             print(f"Vivida warning: could not load model {model_path}: {exc}")
             return None
+
+    def _predict_with_wav2vec2(self, audio_path: Path) -> dict:
+        if self.model is None or self.feature_extractor is None:
+            return None
+
+        waveform, _ = librosa.load(str(audio_path), sr=self.preprocessor.sample_rate, mono=True)
+        waveform = waveform.astype(np.float32)
+        chunks = self._chunk_waveform(waveform)
+
+        started = time.perf_counter()
+        chunk_probabilities = []
+
+        with torch.no_grad():
+            for chunk in chunks:
+                inputs = self.feature_extractor(
+                    chunk,
+                    sampling_rate=self.preprocessor.sample_rate,
+                    return_tensors="pt",
+                    padding=True,
+                )
+                inputs = {
+                    key: value.to(self.device)
+                    for key, value in inputs.items()
+                }
+                outputs = self.model(**inputs)
+                probabilities = torch.softmax(outputs.logits, dim=1)[0]
+                chunk_probabilities.append(probabilities.detach().cpu().numpy())
+
+        probabilities = np.mean(np.stack(chunk_probabilities), axis=0)
+        model_latency = (time.perf_counter() - started) * 1000
+        index = int(np.argmax(probabilities))
+
+        return {
+            "emotion": EMOTIONS[index],
+            "confidence": round(float(probabilities[index]), 4),
+            "probabilities": {
+                emotion: round(float(probabilities[i]), 4)
+                for i, emotion in enumerate(EMOTIONS)
+            },
+            "classifier": self._classifier_name(),
+            "model_latency_ms": round(model_latency, 2),
+            "chunks": len(chunks),
+        }
 
     def _predict_with_model(self, features: np.ndarray) -> dict | None:
         if self.model is None:
@@ -181,12 +245,55 @@ class VividaInferenceEngine:
     def _classifier_name(self) -> str:
         if not self.model_path:
             return "keras_ser_model"
+        if self._is_wav2vec2_model():
+            return "wav2vec2_transformer"
         name = self.model_path.name.lower()
         if "cnn_lstm" in name:
             return "cnn_lstm_keras"
         if "mlp" in name:
             return "mlp_keras"
         return "keras_ser_model"
+
+    def _is_wav2vec2_model(self) -> bool:
+        return self._looks_like_wav2vec2_path(self.model_path)
+
+    def _looks_like_wav2vec2_path(self, path: Path | None) -> bool:
+        if path is None:
+            return False
+        return path.is_dir() and (path / "model.safetensors").exists()
+
+    def _resolve_torch_device(self) -> torch.device:
+        requested = os.getenv("VIVIDA_TORCH_DEVICE", "").strip().lower()
+        if requested:
+            return torch.device(requested)
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        return torch.device("cpu")
+
+    def _chunk_waveform(self, waveform: np.ndarray) -> list[np.ndarray]:
+        total_samples = self.preprocessor.total_samples
+        if waveform.size == 0:
+            return [np.zeros(total_samples, dtype=np.float32)]
+        if waveform.shape[0] <= total_samples:
+            return [
+                np.pad(
+                    waveform.astype(np.float32),
+                    (0, total_samples - waveform.shape[0]),
+                    mode="constant",
+                )
+            ]
+
+        chunks = []
+        for start in range(0, waveform.shape[0], total_samples):
+            chunk = waveform[start : start + total_samples].astype(np.float32)
+            if chunk.shape[0] < int(total_samples * 0.35):
+                continue
+            if chunk.shape[0] < total_samples:
+                chunk = np.pad(chunk, (0, total_samples - chunk.shape[0]), mode="constant")
+            chunks.append(chunk)
+        return chunks or [waveform[:total_samples].astype(np.float32)]
 
     def _normalise_feature_blocks(self, x_arr: np.ndarray) -> np.ndarray:
         mel = x_arr[:, :128, :]

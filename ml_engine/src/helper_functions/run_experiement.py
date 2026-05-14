@@ -142,13 +142,9 @@ def _model_config(model_type):
             "use_class_weight": True,
         }
 
+    raise ValueError("Invalid model type. Choose one of: mlp, cnn_lstm, wav2vec2")
 
-    if model_type == "ast":
-        raise NotImplementedError(
-            "AST fine-tuning still needs a separate PyTorch/Hugging Face pipeline."
-        )
 
-    raise ValueError("Invalid model type. Choose one of: mlp, cnn_lstm, ast")
 
 
 def run_experiment(
@@ -160,20 +156,44 @@ def run_experiment(
     output_dir: str = "ml_engine/results",
     save_best_model: bool = True,
     validation_only: bool = False,
+    learning_rate: float | None = None,
+    freeze_encoder: bool = True,
+    unfreeze_last_n_layers: int | None = None,
+    max_folds: int | None = None,
+    early_stopping_patience: int | None = None,
 ):
     output_dir = _resolve_output_dir(output_dir)
+    model_type = model_type.lower()
 
-    if model_type.lower() == "ast":
-        from src.helper_functions.run_ast_experiment import run_ast_experiment
+    if model_type == "wav2vec2":
+        from src.models.wav2vec2 import run_wav2vec2_experiment
 
-        return run_ast_experiment(
+        # The old generic defaults are tuned for small Keras models. Wav2Vec2
+        # needs smaller batches and fewer epochs, so use the settings from the
+        # successful final run unless the caller overrides them explicitly.
+        wav2vec2_epochs = 15 if epochs == 100 else epochs
+        wav2vec2_batch_size = 4 if batch_size == 32 else batch_size
+        wav2vec2_learning_rate = 1e-5 if learning_rate is None else learning_rate
+        wav2vec2_unfreeze_layers = (
+            4 if unfreeze_last_n_layers is None else unfreeze_last_n_layers
+        )
+        wav2vec2_patience = (
+            3 if early_stopping_patience is None else early_stopping_patience
+        )
+
+        return run_wav2vec2_experiment(
             n_splits=n_splits,
-            epochs=epochs,
-            batch_size=batch_size,
+            epochs=wav2vec2_epochs,
+            batch_size=wav2vec2_batch_size,
+            learning_rate=wav2vec2_learning_rate,
             seed=seed,
-            output_dir=output_dir,
+            freeze_encoder=freeze_encoder,
+            unfreeze_last_n_layers=wav2vec2_unfreeze_layers,
+            max_folds=max_folds,
+            evaluate_test=not validation_only,
+            early_stopping_patience=wav2vec2_patience,
             save_best_model=save_best_model,
-            validation_only=validation_only,
+            output_dir=output_dir,
         )
 
     config = _model_config(model_type)
@@ -416,7 +436,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Train and evaluate a Vivida SER model.")
-    parser.add_argument("model_type", choices=["mlp", "cnn_lstm", "ast"])
+    parser.add_argument("model_type", choices=["mlp", "cnn_lstm", "wav2vec2"])
     parser.add_argument("--splits", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -427,6 +447,35 @@ if __name__ == "__main__":
         "--validation-only",
         action="store_true",
         help="Run cross-validation only and do not load/evaluate the held-out test set.",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Learning rate for Wav2Vec2 fine-tuning.",
+    )
+    parser.add_argument(
+        "--no-freeze-encoder",
+        action="store_true",
+        help="Fine-tune all Wav2Vec2 encoder layers instead of freezing most of them.",
+    )
+    parser.add_argument(
+        "--unfreeze-last-n-layers",
+        type=int,
+        default=None,
+        help="Number of final Wav2Vec2 encoder layers to unfreeze.",
+    )
+    parser.add_argument(
+        "--max-folds",
+        type=int,
+        default=None,
+        help="Limit how many folds to run, useful for quick Wav2Vec2 trials.",
+    )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=None,
+        help="Stop Wav2Vec2 training after this many non-improving epochs.",
     )
     args = parser.parse_args()
 
@@ -439,4 +488,9 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         save_best_model=not args.no_save_model,
         validation_only=args.validation_only,
+        learning_rate=args.learning_rate,
+        freeze_encoder=not args.no_freeze_encoder,
+        unfreeze_last_n_layers=args.unfreeze_last_n_layers,
+        max_folds=args.max_folds,
+        early_stopping_patience=args.early_stopping_patience,
     )
