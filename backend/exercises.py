@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
 import os
 import re
 import time
-import wave
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -15,19 +13,13 @@ import httpx
 
 GEMINI_GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TEXT_MODEL = "gemini-2.5-flash-lite"
-GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
-GEMINI_TTS_VOICE = "Vindemiatrix"
-GEMINI_PCM_RATE = 24000
-GEMINI_PCM_CHANNELS = 1
-GEMINI_PCM_SAMPLE_WIDTH = 2
-GEMINI_TTS_MAX_CHARS = 1800
-GEMINI_TTS_RETRIES = 2
 
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_TTS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 ELEVENLABS_TTS_RETRIES = 2
+TTS_MAX_CHARS = 1800
 
 
 @dataclass(frozen=True)
@@ -260,26 +252,16 @@ async def personalise_guidance(
 
 
 async def synthesize_guidance_audio(text: str) -> SynthesizedAudio:
-    script = _clean_generated_text(text, max_length=GEMINI_TTS_MAX_CHARS)
+    script = _clean_generated_text(text, max_length=TTS_MAX_CHARS)
     if not script:
         raise ValueError("No guidance text supplied")
 
-    provider = tts_provider_name()
-    if provider == "elevenlabs":
-        return await _synthesize_elevenlabs_audio(script)
-    if provider == "gemini":
-        return await _synthesize_gemini_audio(script)
-    raise ValueError("No TTS provider is configured")
+    return await _synthesize_elevenlabs_audio(script)
 
 
 def tts_provider_name() -> str:
-    configured = os.getenv("VIVIDA_TTS_PROVIDER", "").strip().lower()
-    if configured in {"elevenlabs", "gemini"}:
-        return configured
     if os.getenv("ELEVENLABS_API_KEY"):
         return "elevenlabs"
-    if os.getenv("GEMINI_API_KEY"):
-        return "gemini"
     return "browser_fallback"
 
 
@@ -319,68 +301,6 @@ async def _synthesize_elevenlabs_audio(script: str) -> SynthesizedAudio:
         content=audio,
         media_type=_media_type_for_elevenlabs_format(output_format),
         provider="elevenlabs",
-    )
-
-
-async def _synthesize_gemini_audio(script: str) -> SynthesizedAudio:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not set")
-
-    voice_name = os.getenv("VIVIDA_GEMINI_TTS_VOICE", GEMINI_TTS_VOICE)
-    model = os.getenv("VIVIDA_GEMINI_TTS_MODEL", GEMINI_TTS_MODEL)
-    tts_prompt = (
-        "# AUDIO PROFILE: Vivida Guide\n"
-        "A warm, gentle wellbeing guide. Calm, grounded, and mature. "
-        "The voice should feel quietly supportive, never clinical or performative.\n\n"
-        "## THE SCENE: A Quiet Check-In\n"
-        "The listener is taking a private pause after sharing something personal. "
-        "The room is quiet. The guide speaks close to the microphone with no rush.\n\n"
-        "### DIRECTOR'S NOTES\n"
-        "SYNTHESIZE SPEECH ONLY. Do not read these instructions aloud.\n"
-        "Style: soft, compassionate, steady, and reassuring.\n"
-        "Pacing: slow enough for breathing practice, with natural pauses after short sentences.\n"
-        "Articulation: clear British English, low intensity, no dramatic emphasis.\n"
-        "Voice match: use the selected voice naturally; do not force a mismatched character.\n\n"
-        "#### TRANSCRIPT\n"
-        "[softly, slowly]\n"
-        "SPOKEN TRANSCRIPT BEGINS:\n"
-        f"{script}\n"
-        "SPOKEN TRANSCRIPT ENDS."
-    )
-    payload = {
-        "contents": [{"parts": [{"text": tts_prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["AUDIO"],
-            "speechConfig": {
-                "voiceConfig": {
-                    "prebuiltVoiceConfig": {
-                        "voiceName": voice_name,
-                    }
-                }
-            },
-        },
-        "model": model,
-    }
-
-    response_data = await _post_gemini_tts_with_retry(
-        api_key=api_key,
-        model=model,
-        payload=payload,
-    )
-    inline_data = _extract_inline_audio(response_data)
-    audio_bytes = base64.b64decode(inline_data["data"])
-    mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or ""
-    if "wav" in mime_type:
-        return SynthesizedAudio(
-            content=audio_bytes,
-            media_type="audio/wav",
-            provider="gemini",
-        )
-    return SynthesizedAudio(
-        content=_pcm_to_wav(audio_bytes),
-        media_type="audio/wav",
-        provider="gemini",
     )
 
 
@@ -482,37 +402,6 @@ async def _call_gemini_text(prompt: str) -> dict:
     return _parse_json_text("".join(part.get("text", "") for part in parts))
 
 
-async def _post_gemini_tts_with_retry(
-    *,
-    api_key: str,
-    model: str,
-    payload: dict,
-) -> dict:
-    last_error: Exception | None = None
-    for attempt in range(GEMINI_TTS_RETRIES + 1):
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{GEMINI_GENERATE_URL}/{model}:generateContent",
-                    headers={
-                        "x-goog-api-key": api_key,
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-            response.raise_for_status()
-            data = response.json()
-            _extract_inline_audio(data)
-            return data
-        except Exception as exc:
-            last_error = exc
-            if not _should_retry_tts(exc, attempt):
-                break
-            time.sleep(0.25 * (attempt + 1))
-
-    raise last_error or ValueError("Gemini TTS request failed")
-
-
 async def _post_elevenlabs_tts_with_retry(
     *,
     api_key: str,
@@ -545,16 +434,6 @@ async def _post_elevenlabs_tts_with_retry(
             time.sleep(0.25 * (attempt + 1))
 
     raise last_error or ValueError("ElevenLabs TTS request failed")
-
-
-def _should_retry_tts(exc: Exception, attempt: int) -> bool:
-    if attempt >= GEMINI_TTS_RETRIES:
-        return False
-    if isinstance(exc, ValueError):
-        return True
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in {429, 500, 502, 503, 504}
-    return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
 
 
 def _should_retry_elevenlabs_tts(exc: Exception, attempt: int) -> bool:
@@ -619,21 +498,3 @@ def _clean_generated_text(value: object, *, max_length: int) -> str:
     cleaned = re.sub(r"\s+", " ", value).strip()
     return cleaned[:max_length].rsplit(" ", 1)[0] if len(cleaned) > max_length else cleaned
 
-
-def _extract_inline_audio(data: dict) -> dict:
-    for candidate in data.get("candidates", []):
-        for part in candidate.get("content", {}).get("parts", []):
-            inline_data = part.get("inlineData") or part.get("inline_data")
-            if inline_data and inline_data.get("data"):
-                return inline_data
-    raise ValueError("Gemini TTS response did not include audio data")
-
-
-def _pcm_to_wav(pcm_bytes: bytes) -> bytes:
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wav_file:
-        wav_file.setnchannels(GEMINI_PCM_CHANNELS)
-        wav_file.setsampwidth(GEMINI_PCM_SAMPLE_WIDTH)
-        wav_file.setframerate(GEMINI_PCM_RATE)
-        wav_file.writeframes(pcm_bytes)
-    return output.getvalue()

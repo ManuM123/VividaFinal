@@ -105,9 +105,9 @@ def test_tts_provider_prefers_elevenlabs_when_configured(monkeypatch):
     assert exercises.tts_provider_name() == "elevenlabs"
 
 
-def test_tts_provider_can_force_gemini(monkeypatch):
+def test_tts_provider_does_not_use_gemini_for_tts(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-elevenlabs-key")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("VIVIDA_TTS_PROVIDER", "gemini")
 
-    assert exercises.tts_provider_name() == "gemini"
+    assert exercises.tts_provider_name() == "elevenlabs"
