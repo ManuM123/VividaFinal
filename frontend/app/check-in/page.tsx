@@ -213,22 +213,36 @@ export default function CheckInPage() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
 
     try {
-      if (!hasEnoughTranscript(transcriptRef.current)) {
+      const blob = new Blob(chunksRef.current, {
+        type: mediaRecorderRef.current?.mimeType || "audio/webm",
+      });
+
+      if (!blob.size || blob.size < 1000) {
         chunksRef.current = [];
-        setStatus("I could not hear enough words. Please try again.");
+        setStatus("I could not hear enough audio. Please try again.");
         setIsRecording(false);
         return;
       }
 
-      const blob = new Blob(chunksRef.current, {
-        type: mediaRecorderRef.current?.mimeType || "audio/webm",
-      });
       const wavBlob = await convertToWav(blob);
+      const speechStats = await analyseSpeechAudio(wavBlob);
+
+      if (!hasEnoughSpeechAudio(speechStats)) {
+        chunksRef.current = [];
+        setStatus("I could not hear enough speech. Please try again.");
+        setIsRecording(false);
+        return;
+      }
+
       const data = await analyseRecording(wavBlob, {
         sourceSize: blob.size,
         sourceType: blob.type,
         wavSize: wavBlob.size,
         recorderMimeType: mediaRecorderRef.current?.mimeType || "",
+        durationSeconds: speechStats.durationSeconds,
+        rms: speechStats.rms,
+        peakAbs: speechStats.peakAbs,
+        activeRatio: speechStats.activeRatio,
       });
       setResult(data);
       vibrate(data.guidance.haptics || [25, 35, 25]);
@@ -973,15 +987,6 @@ function ExerciseMotion({
   );
 }
 
-function hasEnoughTranscript(text: string) {
-  const words = text
-    .trim()
-    .split(/\s+/)
-    .filter((word) => /[a-zA-Z]/.test(word));
-
-  return words.length >= 2;
-}
-
 function vibrate(pattern: number[]) {
   if ("vibrate" in navigator) {
     navigator.vibrate(pattern);
@@ -1032,6 +1037,76 @@ async function convertToWav(blob: Blob) {
   const wavBuffer = encodeWav(audioBuffer);
   await audioContext.close();
   return new Blob([wavBuffer], { type: "audio/wav" });
+}
+
+type SpeechAudioStats = {
+  durationSeconds: number;
+  rms: number;
+  peakAbs: number;
+  activeRatio: number;
+};
+
+async function analyseSpeechAudio(blob: Blob): Promise<SpeechAudioStats> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const audioContext = new AudioContextClass();
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  const channelData = audioBuffer.getChannelData(0);
+  const durationSeconds = audioBuffer.duration;
+  let squaredSum = 0;
+  let peakAbs = 0;
+
+  for (let i = 0; i < channelData.length; i += 1) {
+    const sample = channelData[i];
+    const absSample = Math.abs(sample);
+    squaredSum += sample * sample;
+    if (absSample > peakAbs) {
+      peakAbs = absSample;
+    }
+  }
+
+  const rms = channelData.length
+    ? Math.sqrt(squaredSum / channelData.length)
+    : 0;
+  const frameLength = Math.max(1, Math.floor(audioBuffer.sampleRate * 0.05));
+  const hopLength = Math.max(1, Math.floor(audioBuffer.sampleRate * 0.025));
+  const speechThreshold = Math.max(0.006, rms * 0.5);
+  let activeFrames = 0;
+  let totalFrames = 0;
+
+  for (
+    let start = 0;
+    start + frameLength <= channelData.length;
+    start += hopLength
+  ) {
+    let frameSquaredSum = 0;
+    for (let i = start; i < start + frameLength; i += 1) {
+      frameSquaredSum += channelData[i] * channelData[i];
+    }
+    const frameRms = Math.sqrt(frameSquaredSum / frameLength);
+    if (frameRms > speechThreshold) {
+      activeFrames += 1;
+    }
+    totalFrames += 1;
+  }
+
+  await audioContext.close();
+
+  return {
+    durationSeconds,
+    rms,
+    peakAbs,
+    activeRatio: totalFrames ? activeFrames / totalFrames : 0,
+  };
+}
+
+function hasEnoughSpeechAudio(stats: SpeechAudioStats) {
+  return (
+    stats.durationSeconds >= 1.2 &&
+    stats.rms >= 0.0025 &&
+    stats.peakAbs >= 0.018 &&
+    stats.activeRatio >= 0.04
+  );
 }
 
 function encodeWav(audioBuffer: AudioBuffer) {
