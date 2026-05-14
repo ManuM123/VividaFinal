@@ -260,7 +260,14 @@ class VividaInferenceEngine:
     def _looks_like_wav2vec2_path(self, path: Path | None) -> bool:
         if path is None:
             return False
-        return path.is_dir() and (path / "model.safetensors").exists()
+        if not path.is_dir():
+            return False
+        has_config = (path / "config.json").exists()
+        has_single_weights = (path / "model.safetensors").exists()
+        has_sharded_weights = (path / "model.safetensors.index.json").exists() or any(
+            path.glob("model-*-of-*.safetensors")
+        )
+        return has_config and (has_single_weights or has_sharded_weights)
 
     def _resolve_torch_device(self) -> torch.device:
         requested = os.getenv("VIVIDA_TORCH_DEVICE", "").strip().lower()
