@@ -10,4 +10,4 @@ services:
     autoDeployTrigger: checksPass
     envVars:
       - key: VIVIDA_MODEL_PATH
-        value: /app/ml_engine/results/cnn_lstm_best.keras
+        value: /app/ml_engine/results/wav2vec2_best

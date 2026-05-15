@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
     NUMBA_CACHE_DIR=/tmp/numba \
-    VIVIDA_MODEL_PATH=/app/ml_engine/results/cnn_lstm_best.keras
+    VIVIDA_MODEL_PATH=/app/ml_engine/results/wav2vec2_best
 
 WORKDIR /app
 
