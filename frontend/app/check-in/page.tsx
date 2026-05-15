@@ -58,6 +58,8 @@ export default function CheckInPage() {
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [hasVoiceConsent, setHasVoiceConsent] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [guideAudioUrl, setGuideAudioUrl] = useState<string | null>(null);
+  const [isGuideLoading, setIsGuideLoading] = useState(false);
   const [engagement, setEngagement] =
     useState<EngagementSummary>(EMPTY_ENGAGEMENT);
   const [streakDates, setStreakDates] = useState<string[]>([]);
@@ -67,6 +69,7 @@ export default function CheckInPage() {
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const guideAudioRef = useRef<HTMLAudioElement | null>(null);
+  const guideAudioUrlRef = useRef<string | null>(null);
   const browserUtterancesRef = useRef<SpeechSynthesisUtterance[]>([]);
   const isSpeakingGuideRef = useRef(false);
   const transcriptRef = useRef("");
@@ -125,6 +128,14 @@ export default function CheckInPage() {
       );
       setIsMounted(true);
     }, 0);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (guideAudioUrlRef.current) {
+        URL.revokeObjectURL(guideAudioUrlRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -245,6 +256,8 @@ export default function CheckInPage() {
         activeRatio: speechStats.activeRatio,
       });
       setResult(data);
+      setGuideAudioUrl(null);
+      guideAudioUrlRef.current = null;
       vibrate(data.guidance.haptics || [25, 35, 25]);
       setStatus("Guidance ready");
 
@@ -446,12 +459,17 @@ export default function CheckInPage() {
     if (!result?.guidance.voice_script) {
       return;
     }
+    if (isGuideLoading) {
+      return;
+    }
+
     stopGuideAudio();
     const script = result.guidance.voice_script;
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     vibrate(result.guidance.haptics || [20, 40, 20]);
+    setIsGuideLoading(true);
 
     try {
       setStatus("Creating voice guide");
@@ -462,7 +480,14 @@ export default function CheckInPage() {
       });
 
       if (!response.ok) {
-        throw new Error("TTS unavailable");
+        let detail = "TTS unavailable";
+        try {
+          const errorBody = (await response.json()) as { detail?: string };
+          detail = errorBody.detail || detail;
+        } catch {
+          detail = `${detail} (${response.status})`;
+        }
+        throw new Error(detail);
       }
 
       const audioBlob = await response.blob();
@@ -471,19 +496,32 @@ export default function CheckInPage() {
       }
       const provider = response.headers.get("X-Vivida-TTS-Provider");
       const audioUrl = URL.createObjectURL(audioBlob);
+      if (guideAudioUrlRef.current) {
+        URL.revokeObjectURL(guideAudioUrlRef.current);
+      }
+      guideAudioUrlRef.current = audioUrl;
+      setGuideAudioUrl(audioUrl);
       const audio = new Audio(audioUrl);
+      audio.setAttribute("playsinline", "true");
       guideAudioRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
-      audio.onerror = () => URL.revokeObjectURL(audioUrl);
-      await audio.play();
-      setStatus(provider === "elevenlabs" ? "Playing ElevenLabs guide" : "Playing guide");
+      audio.onended = () => setStatus("Guide complete");
+      audio.onerror = () => setStatus("Tap the audio player to hear the guide.");
+      try {
+        await audio.play();
+        setStatus(provider === "elevenlabs" ? "Playing ElevenLabs guide" : "Playing guide");
+      } catch (playError) {
+        console.warn(playError);
+        setStatus("Tap the audio player to hear the guide.");
+      }
       return;
     } catch (error) {
       console.warn(error);
       if (playBrowserGuide(script)) {
         return;
       }
-      setStatus("Voice playback unavailable. Read the steps below.");
+      setStatus(error instanceof Error ? error.message : "Voice playback unavailable.");
+    } finally {
+      setIsGuideLoading(false);
     }
   }
 
@@ -676,10 +714,11 @@ export default function CheckInPage() {
           <div className="grid grid-cols-[1fr_auto] gap-3 max-[460px]:grid-cols-1">
             <Button
               className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--lavender)] font-black text-white"
+              disabled={isGuideLoading}
               onClick={playGuide}
             >
               <Play className="h-4 w-4" aria-hidden="true" />
-              Play guide
+              {isGuideLoading ? "Creating guide" : "Play guide"}
             </Button>
             <Button
               className="flex h-12 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-5 font-black"
@@ -687,12 +726,24 @@ export default function CheckInPage() {
                 transcriptRef.current = "";
                 setTranscript("");
                 setResult(null);
+                setGuideAudioUrl(null);
+                if (guideAudioUrlRef.current) {
+                  URL.revokeObjectURL(guideAudioUrlRef.current);
+                  guideAudioUrlRef.current = null;
+                }
               }}
             >
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               New check-in
             </Button>
           </div>
+          {guideAudioUrl && (
+            <audio
+              className="w-full"
+              controls
+              src={guideAudioUrl}
+            />
+          )}
         </section>
       )}
     </AppShell>
