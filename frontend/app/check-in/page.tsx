@@ -455,7 +455,7 @@ export default function CheckInPage() {
     recognition.start();
   }
 
-  async function playGuide() {
+  function playGuide() {
     if (!result?.guidance.voice_script) {
       return;
     }
@@ -469,60 +469,12 @@ export default function CheckInPage() {
       window.speechSynthesis.cancel();
     }
     vibrate(result.guidance.haptics || [20, 40, 20]);
-    setIsGuideLoading(true);
 
-    try {
-      setStatus("Creating voice guide");
-      const response = await fetch(`${ML_API_URL}/api/tts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: result.guidance.voice_script }),
-      });
-
-      if (!response.ok) {
-        let detail = "TTS unavailable";
-        try {
-          const errorBody = (await response.json()) as { detail?: string };
-          detail = errorBody.detail || detail;
-        } catch {
-          detail = `${detail} (${response.status})`;
-        }
-        throw new Error(detail);
-      }
-
-      const audioBlob = await response.blob();
-      if (!audioBlob.size || !audioBlob.type.includes("audio")) {
-        throw new Error("TTS response was not playable audio");
-      }
-      const provider = response.headers.get("X-Vivida-TTS-Provider");
-      const audioUrl = URL.createObjectURL(audioBlob);
-      if (guideAudioUrlRef.current) {
-        URL.revokeObjectURL(guideAudioUrlRef.current);
-      }
-      guideAudioUrlRef.current = audioUrl;
-      setGuideAudioUrl(audioUrl);
-      const audio = new Audio(audioUrl);
-      audio.setAttribute("playsinline", "true");
-      guideAudioRef.current = audio;
-      audio.onended = () => setStatus("Guide complete");
-      audio.onerror = () => setStatus("Tap the audio player to hear the guide.");
-      try {
-        await audio.play();
-        setStatus(provider === "elevenlabs" ? "Playing ElevenLabs guide" : "Playing guide");
-      } catch (playError) {
-        console.warn(playError);
-        setStatus("Tap the audio player to hear the guide.");
-      }
+    if (playBrowserGuide(script)) {
       return;
-    } catch (error) {
-      console.warn(error);
-      if (playBrowserGuide(script)) {
-        return;
-      }
-      setStatus(error instanceof Error ? error.message : "Voice playback unavailable.");
-    } finally {
-      setIsGuideLoading(false);
     }
+
+    setStatus("Voice playback unavailable. Read the steps below.");
   }
 
   function stopGuideAudio() {
